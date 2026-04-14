@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI DevOps Platform — Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;background:#06060f;color:#e0e0e0;min-height:100vh;display:flex;overflow:hidden}
+.bg{position:fixed;inset:0;z-index:0;overflow:hidden}
+.bg-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(108,71,255,0.06) 1px,transparent 1px),linear-gradient(90deg,rgba(108,71,255,0.06) 1px,transparent 1px);background-size:40px 40px}
+.bg-glow1{position:absolute;top:-200px;left:-200px;width:600px;height:600px;background:radial-gradient(circle,rgba(108,71,255,0.15),transparent 70%);animation:float1 8s ease-in-out infinite}
+.bg-glow2{position:absolute;bottom:-200px;right:-200px;width:500px;height:500px;background:radial-gradient(circle,rgba(74,222,128,0.08),transparent 70%);animation:float2 10s ease-in-out infinite}
+@keyframes float1{0%,100%{transform:translate(0,0)}50%{transform:translate(30px,20px)}}
+@keyframes float2{0%,100%{transform:translate(0,0)}50%{transform:translate(-20px,30px)}}
+.left{flex:1;display:flex;flex-direction:column;justify-content:center;padding:60px;position:relative;z-index:1}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:48px}
+.brand-box{width:40px;height:40px;background:linear-gradient(135deg,#6c47ff,#a78bfa);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.brand-name{font-size:20px;font-weight:700;color:#fff}
+.hero-title{font-size:48px;font-weight:800;line-height:1.1;color:#fff;margin-bottom:16px}
+.hero-title span{background:linear-gradient(135deg,#6c47ff,#a78bfa,#4ade80);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-sub{font-size:16px;color:#555;line-height:1.7;max-width:420px;margin-bottom:40px}
+.features{display:flex;flex-direction:column;gap:14px}
+.feat{display:flex;align-items:center;gap:12px;font-size:13px;color:#666}
+.feat-ico{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.feat-txt strong{color:#aaa;display:block;font-size:12px;margin-bottom:1px}
+.stats{display:flex;gap:32px;margin-top:48px}
+.stat-num{font-size:28px;font-weight:800;color:#fff}
+.stat-lbl{font-size:11px;color:#444;margin-top:2px}
+.right{width:460px;display:flex;align-items:center;justify-content:center;padding:40px;position:relative;z-index:1;flex-shrink:0}
+.card{width:100%;background:rgba(15,15,26,0.9);border:1px solid #1a1a2e;border-radius:16px;padding:36px;backdrop-filter:blur(20px)}
+.tabs{display:flex;background:#060610;border-radius:8px;padding:3px;margin-bottom:28px}
+.tab{flex:1;padding:8px;text-align:center;cursor:pointer;border-radius:6px;font-size:13px;font-weight:600;color:#555;transition:all 0.2s}
+.tab.active{background:#1e1442;color:#c4b5fd}
+.form-section{display:none}
+.form-section.active{display:block}
+.form-title{font-size:20px;font-weight:700;color:#fff;margin-bottom:4px}
+.form-sub{font-size:12px;color:#555;margin-bottom:24px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:11px;color:#666;margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+.field input{width:100%;background:#060610;border:1px solid #1e1e30;border-radius:8px;padding:11px 14px;color:#ddd;font-size:13px;outline:none;transition:border-color 0.2s}
+.field input:focus{border-color:#6c47ff;box-shadow:0 0 0 3px rgba(108,71,255,0.1)}
+.field input::placeholder{color:#333}
+.btn{width:100%;padding:12px;border-radius:8px;border:none;cursor:pointer;font-size:14px;font-weight:700;transition:all 0.2s;margin-top:4px}
+.btn-primary{background:linear-gradient(135deg,#6c47ff,#8b5cf6);color:#fff}
+.btn-primary:hover{background:linear-gradient(135deg,#7c57ff,#9b6cf6);transform:translateY(-1px);box-shadow:0 8px 20px rgba(108,71,255,0.3)}
+.btn-primary:disabled{background:#2a2a40;color:#555;transform:none;box-shadow:none;cursor:not-allowed}
+.error{background:#1a0a0a;border:1px solid #7f1d1d;border-radius:6px;padding:10px 12px;font-size:12px;color:#f87171;margin-top:12px;display:none}
+.success{background:#0d2d1a;border:1px solid #166534;border-radius:6px;padding:10px 12px;font-size:12px;color:#4ade80;margin-top:12px;display:none}
+.divider{display:flex;align-items:center;gap:12px;margin:20px 0}
+.divider-line{flex:1;height:1px;background:#1a1a2e}
+.divider-txt{font-size:11px;color:#444}
+.terms{font-size:10px;color:#444;text-align:center;margin-top:16px;line-height:1.6}
+.terms a{color:#6c47ff;text-decoration:none}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.pwd-hint{font-size:10px;color:#444;margin-top:4px}
+@media(max-width:900px){.left{display:none}.right{width:100%;padding:24px}}
+</style>
+</head>
+<body>
+<div class="bg">
+  <div class="bg-grid"></div>
+  <div class="bg-glow1"></div>
+  <div class="bg-glow2"></div>
+</div>
+
+<div class="left">
+  <div class="brand">
+    <div class="brand-box">⚡</div>
+    <div class="brand-name">AI DevOps Platform</div>
+  </div>
+  <div class="hero-title">Deploy AWS infra<br>in <span>minutes</span>, not days</div>
+  <div class="hero-sub">Design visually, generate Terraform with AI, deploy to AWS with one click. No DevOps expertise required.</div>
+  <div class="features">
+    <div class="feat"><div class="feat-ico" style="background:#1e1442">🗺</div><div class="feat-txt"><strong>Visual Infrastructure Canvas</strong>Drag, drop and connect 200+ AWS services</div></div>
+    <div class="feat"><div class="feat-ico" style="background:#0d2d1a">⚡</div><div class="feat-txt"><strong>AI Code Generation</strong>Terraform, Docker, Kubernetes generated instantly</div></div>
+    <div class="feat"><div class="feat-ico" style="background:#1a0d2e">🚀</div><div class="feat-txt"><strong>One-Click Deploy & Destroy</strong>Full lifecycle management with live logs</div></div>
+    <div class="feat"><div class="feat-ico" style="background:#0d1d3a">☁</div><div class="feat-txt"><strong>Live AWS Scanner</strong>Import your existing infrastructure to canvas</div></div>
+  </div>
+  <div class="stats">
+    <div><div class="stat-num">200+</div><div class="stat-lbl">AWS Services</div></div>
+    <div><div class="stat-num">5min</div><div class="stat-lbl">To Deploy</div></div>
+    <div><div class="stat-num">100%</div><div class="stat-lbl">AI Powered</div></div>
+  </div>
+</div>
+
+<div class="right">
+  <div class="card">
+    <div class="tabs">
+      <div class="tab active" id="tab-login" onclick="switchTab('login')">Sign In</div>
+      <div class="tab" id="tab-register" onclick="switchTab('register')">Create Account</div>
+    </div>
+
+    <!-- LOGIN -->
+    <div class="form-section active" id="section-login">
+      <div class="form-title">Welcome back</div>
+      <div class="form-sub">Sign in to your account to continue</div>
+      <div class="field">
+        <label>Email Address</label>
+        <input type="email" id="login-email" placeholder="you@company.com" autocomplete="email">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <button class="btn btn-primary" id="login-btn" onclick="doLogin()">Sign In to Platform</button>
+      <div class="error" id="login-error"></div>
+      <div class="success" id="login-success"></div>
+    </div>
+
+    <!-- REGISTER -->
+    <div class="form-section" id="section-register">
+      <div class="form-title">Create your account</div>
+      <div class="form-sub">Start deploying AWS infrastructure in minutes</div>
+      <div class="field">
+        <label>Full Name</label>
+        <input type="text" id="reg-name" placeholder="Vijay Kumar" autocomplete="name">
+      </div>
+      <div class="field">
+        <label>Email Address</label>
+        <input type="email" id="reg-email" placeholder="you@company.com" autocomplete="email">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="reg-password" placeholder="••••••••" autocomplete="new-password" onkeydown="if(event.key==='Enter')doRegister()">
+        <div class="pwd-hint">Minimum 6 characters</div>
+      </div>
+      <button class="btn btn-primary" id="reg-btn" onclick="doRegister()">Create Free Account</button>
+      <div class="error" id="reg-error"></div>
+      <div class="success" id="reg-success"></div>
+      <div class="terms">By creating an account you agree to our <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});
+  document.querySelectorAll('.form-section').forEach(function(s){s.classList.remove('active');});
+  document.getElementById('tab-'+tab).classList.add('active');
+  document.getElementById('section-'+tab).classList.add('active');
+}
+
+async function doLogin() {
+  var email = document.getElementById('login-email').value.trim();
+  var password = document.getElementById('login-password').value;
+  var btn = document.getElementById('login-btn');
+  var errEl = document.getElementById('login-error');
+  var sucEl = document.getElementById('login-success');
+  errEl.style.display='none'; sucEl.style.display='none';
+  if (!email || !password) { errEl.textContent='Please enter email and password.'; errEl.style.display='block'; return; }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>Signing in...';
+  try {
+    var r = await fetch('/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email: email, password: password})
+    });
+    var data = await r.json();
+    if (!r.ok) { errEl.textContent = data.detail || 'Invalid email or password.'; errEl.style.display='block'; }
+    else {
+      sucEl.textContent = 'Welcome back, ' + data.name + '! Redirecting...';
+      sucEl.style.display='block';
+      setTimeout(function(){ window.location.href = '/app'; }, 1000);
+    }
+  } catch(e) {
+    errEl.textContent = 'Connection error. Is the server running?';
+    errEl.style.display='block';
+  }
+  btn.disabled = false;
+  btn.innerHTML = 'Sign In to Platform';
+}
+
+async function doRegister() {
+  var name = document.getElementById('reg-name').value.trim();
+  var email = document.getElementById('reg-email').value.trim();
+  var password = document.getElementById('reg-password').value;
+  var btn = document.getElementById('reg-btn');
+  var errEl = document.getElementById('reg-error');
+  var sucEl = document.getElementById('reg-success');
+  errEl.style.display='none'; sucEl.style.display='none';
+  if (!name || !email || !password) { errEl.textContent='Please fill in all fields.'; errEl.style.display='block'; return; }
+  if (password.length < 6) { errEl.textContent='Password must be at least 6 characters.'; errEl.style.display='block'; return; }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>Creating account...';
+  try {
+    var r = await fetch('/auth/register', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, email: email, password: password})
+    });
+    var data = await r.json();
+    if (!r.ok) { errEl.textContent = data.detail || 'Registration failed.'; errEl.style.display='block'; }
+    else {
+      sucEl.textContent = 'Account created! Welcome, ' + data.name + '! Redirecting...';
+      sucEl.style.display='block';
+      setTimeout(function(){ window.location.href = '/app'; }, 1200);
+    }
+  } catch(e) {
+    errEl.textContent = 'Connection error. Is the server running?';
+    errEl.style.display='block';
+  }
+  btn.disabled = false;
+  btn.innerHTML = 'Create Free Account';
+}
+</script>
+</body>
+</html>

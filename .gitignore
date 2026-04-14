@@ -1,0 +1,26 @@
+# Environment variables - NEVER commit this
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+env/
+
+# Database
+*.db
+*.sqlite3
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+.terraform.lock.hcl
+
+# OS
+.DS_Store
+Thumbs.db

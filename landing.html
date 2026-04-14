@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI DevOps Platform — Deploy AWS Infrastructure in Minutes</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --purple:#6c47ff;--purple-light:#a78bfa;--green:#4ade80;--red:#f87171;
+  --amber:#fbbf24;--blue:#60a5fa;--bg:#06060f;--bg2:#0f0f1a;--bg3:#13131f;
+  --border:#1a1a2e;--text:#e0e0e0;--muted:#555;
+}
+html{scroll-behavior:smooth}
+body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:0 40px;height:64px;display:flex;align-items:center;background:rgba(6,6,15,0.85);backdrop-filter:blur(20px);border-bottom:1px solid rgba(26,26,46,0.5);transition:all 0.3s}
+.nav-brand{display:flex;align-items:center;gap:10px;text-decoration:none}
+.nav-box{width:34px;height:34px;background:linear-gradient(135deg,var(--purple),var(--purple-light));border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.nav-name{font-size:16px;font-weight:800;color:#fff}
+.nav-links{display:flex;align-items:center;gap:28px;margin-left:40px}
+.nav-links a{font-size:13px;color:var(--muted);text-decoration:none;transition:color 0.2s}
+.nav-links a:hover{color:#fff}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.btn-outline{padding:7px 18px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--muted);cursor:pointer;text-decoration:none;transition:all 0.2s;background:transparent}
+.btn-outline:hover{border-color:var(--purple);color:var(--purple-light)}
+.btn-primary{padding:8px 20px;background:linear-gradient(135deg,var(--purple),#8b5cf6);border:none;border-radius:8px;font-size:13px;font-weight:700;color:#fff;cursor:pointer;text-decoration:none;transition:all 0.2s}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(108,71,255,0.35)}
+
+/* HERO */
+.hero{min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:100px 20px 60px;position:relative;overflow:hidden}
+.hero-bg{position:absolute;inset:0;z-index:0}
+.hero-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(108,71,255,0.05) 1px,transparent 1px),linear-gradient(90deg,rgba(108,71,255,0.05) 1px,transparent 1px);background-size:50px 50px}
+.glow1{position:absolute;top:10%;left:20%;width:500px;height:500px;background:radial-gradient(circle,rgba(108,71,255,0.12),transparent 70%);animation:float 8s ease-in-out infinite}
+.glow2{position:absolute;bottom:10%;right:15%;width:400px;height:400px;background:radial-gradient(circle,rgba(74,222,128,0.07),transparent 70%);animation:float 10s ease-in-out infinite reverse}
+@keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(20px,15px)}}
+.hero-content{position:relative;z-index:1;max-width:800px}
+.hero-badge{display:inline-flex;align-items:center;gap:7px;padding:6px 14px;background:rgba(108,71,255,0.12);border:1px solid rgba(108,71,255,0.3);border-radius:20px;font-size:12px;color:var(--purple-light);margin-bottom:28px;animation:fadeup 0.6s ease both}
+@keyframes fadeup{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.hero-title{font-size:clamp(36px,6vw,72px);font-weight:900;line-height:1.05;color:#fff;margin-bottom:20px;animation:fadeup 0.6s 0.1s ease both}
+.hero-title .grad{background:linear-gradient(135deg,var(--purple),var(--purple-light),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-sub{font-size:clamp(15px,2vw,20px);color:var(--muted);line-height:1.7;max-width:600px;margin:0 auto 36px;animation:fadeup 0.6s 0.2s ease both}
+.hero-btns{display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:48px;animation:fadeup 0.6s 0.3s ease both}
+.btn-hero-primary{padding:14px 32px;background:linear-gradient(135deg,var(--purple),#8b5cf6);border:none;border-radius:10px;font-size:15px;font-weight:700;color:#fff;cursor:pointer;text-decoration:none;transition:all 0.2s;display:inline-flex;align-items:center;gap:8px}
+.btn-hero-primary:hover{transform:translateY(-2px);box-shadow:0 12px 30px rgba(108,71,255,0.4)}
+.btn-hero-outline{padding:13px 28px;background:transparent;border:1px solid var(--border);border-radius:10px;font-size:15px;font-weight:600;color:var(--text);cursor:pointer;text-decoration:none;transition:all 0.2s}
+.btn-hero-outline:hover{border-color:var(--purple);color:var(--purple-light)}
+.hero-stats{display:flex;justify-content:center;gap:48px;animation:fadeup 0.6s 0.4s ease both}
+.stat-item{text-align:center}
+.stat-num{font-size:28px;font-weight:800;color:#fff}
+.stat-lbl{font-size:11px;color:var(--muted);margin-top:2px}
+
+/* DEMO */
+.demo-section{padding:60px 20px;background:var(--bg)}
+.demo-wrap{max-width:900px;margin:0 auto}
+.demo-screen{background:var(--bg2);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 40px 80px rgba(0,0,0,0.6)}
+.demo-bar{display:flex;align-items:center;gap:8px;padding:12px 16px;background:var(--bg3);border-bottom:1px solid var(--border)}
+.demo-dot{width:10px;height:10px;border-radius:50%}
+.demo-url{flex:1;background:var(--bg);border-radius:6px;padding:4px 12px;font-size:11px;color:var(--muted);text-align:center}
+.demo-img{width:100%;height:380px;background:linear-gradient(135deg,#0d0d18,#13131f);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.demo-nodes{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.demo-node{position:absolute;background:#13131f;border:1.5px solid #1e1e30;border-radius:9px;padding:8px 12px;min-width:130px;font-size:11px;display:flex;align-items:center;gap:7px;box-shadow:0 4px 12px rgba(0,0,0,0.4)}
+.demo-node-ico{width:24px;height:24px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0}
+.demo-line{position:absolute;border:1px dashed rgba(108,71,255,0.4);pointer-events:none}
+.demo-badge{position:absolute;bottom:12px;right:12px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:6px;padding:4px 10px;font-size:10px;color:var(--green);display:flex;align-items:center;gap:4px}
+
+/* FEATURES */
+.section{padding:80px 20px}
+.section-inner{max-width:1100px;margin:0 auto}
+.section-badge{display:inline-block;padding:4px 12px;background:rgba(108,71,255,0.1);border:1px solid rgba(108,71,255,0.2);border-radius:20px;font-size:11px;color:var(--purple-light);margin-bottom:14px}
+.section-title{font-size:clamp(28px,4vw,44px);font-weight:800;color:#fff;margin-bottom:14px;line-height:1.15}
+.section-sub{font-size:16px;color:var(--muted);max-width:560px;line-height:1.7}
+.feat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-top:48px}
+.feat-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px;transition:all 0.3s}
+.feat-card:hover{border-color:var(--purple);transform:translateY(-4px);box-shadow:0 16px 40px rgba(108,71,255,0.1)}
+.feat-icon{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:16px}
+.feat-title{font-size:16px;font-weight:700;color:#fff;margin-bottom:8px}
+.feat-desc{font-size:13px;color:var(--muted);line-height:1.6}
+
+/* HOW IT WORKS */
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px;margin-top:48px;position:relative}
+.step{text-align:center;padding:28px 20px}
+.step-num{width:44px;height:44px;background:linear-gradient(135deg,var(--purple),#8b5cf6);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;color:#fff;margin:0 auto 16px}
+.step-title{font-size:16px;font-weight:700;color:#fff;margin-bottom:8px}
+.step-desc{font-size:13px;color:var(--muted);line-height:1.6}
+.step-arrow{display:none}
+
+/* PRICING */
+.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-top:48px;max-width:960px;margin-left:auto;margin-right:auto}
+.price-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:28px;transition:all 0.3s;position:relative}
+.price-card.popular{border-color:var(--purple);background:linear-gradient(135deg,rgba(108,71,255,0.08),var(--bg2))}
+.price-badge{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,var(--purple),#8b5cf6);color:#fff;font-size:11px;font-weight:700;padding:4px 14px;border-radius:20px;white-space:nowrap}
+.price-plan{font-size:14px;font-weight:700;color:var(--purple-light);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px}
+.price-amount{font-size:48px;font-weight:900;color:#fff;line-height:1}
+.price-period{font-size:14px;color:var(--muted)}
+.price-desc{font-size:13px;color:var(--muted);margin:12px 0 20px;line-height:1.6}
+.price-features{list-style:none;margin-bottom:24px}
+.price-features li{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);padding:6px 0;border-bottom:1px solid rgba(26,26,46,0.5)}
+.price-features li:last-child{border:none}
+.pf-check{color:var(--green);font-size:12px;flex-shrink:0}
+.pf-x{color:var(--muted);font-size:12px;flex-shrink:0}
+.btn-price-primary{width:100%;padding:12px;background:linear-gradient(135deg,var(--purple),#8b5cf6);border:none;border-radius:9px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;text-decoration:none;display:block;text-align:center;transition:all 0.2s}
+.btn-price-primary:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(108,71,255,0.35)}
+.btn-price-outline{width:100%;padding:11px;background:transparent;border:1px solid var(--border);border-radius:9px;font-size:14px;font-weight:600;color:var(--text);cursor:pointer;text-decoration:none;display:block;text-align:center;transition:all 0.2s}
+.btn-price-outline:hover{border-color:var(--purple);color:var(--purple-light)}
+
+/* COMPARISON */
+.compare-table{width:100%;border-collapse:collapse;margin-top:48px;background:var(--bg2);border-radius:12px;overflow:hidden;border:1px solid var(--border)}
+.compare-table th{padding:14px 20px;text-align:left;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);background:var(--bg3)}
+.compare-table th:not(:first-child){text-align:center}
+.compare-table td{padding:13px 20px;font-size:13px;border-bottom:1px solid rgba(26,26,46,0.5)}
+.compare-table td:not(:first-child){text-align:center}
+.compare-table tr:last-child td{border:none}
+.compare-table tr:hover td{background:rgba(108,71,255,0.03)}
+.c-yes{color:var(--green);font-size:14px}
+.c-no{color:var(--muted);font-size:14px}
+.c-highlight{color:var(--purple-light);font-weight:600}
+
+/* CTA */
+.cta-section{padding:100px 20px;text-align:center;position:relative;overflow:hidden}
+.cta-bg{position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(108,71,255,0.12),transparent 70%)}
+.cta-title{font-size:clamp(28px,5vw,52px);font-weight:900;color:#fff;margin-bottom:16px;position:relative}
+.cta-sub{font-size:17px;color:var(--muted);margin-bottom:36px;position:relative}
+.cta-btns{display:flex;justify-content:center;gap:14px;position:relative}
+
+/* FOOTER */
+footer{padding:40px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px}
+.footer-brand{display:flex;align-items:center;gap:8px}
+.footer-txt{font-size:12px;color:var(--muted)}
+.footer-links{display:flex;gap:20px}
+.footer-links a{font-size:12px;color:var(--muted);text-decoration:none;transition:color 0.2s}
+.footer-links a:hover{color:#fff}
+
+@media(max-width:768px){
+  nav{padding:0 16px}
+  .nav-links{display:none}
+  .hero-stats{gap:24px}
+  .hero-btns{flex-direction:column;align-items:center}
+  .steps{grid-template-columns:1fr}
+  footer{flex-direction:column;text-align:center}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a class="nav-brand" href="#">
+    <div class="nav-box">⚡</div>
+    <span class="nav-name">AI DevOps</span>
+  </a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#how">How it works</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#compare">Compare</a>
+  </div>
+  <div class="nav-right">
+    <a class="btn-outline" href="/login">Sign In</a>
+    <a class="btn-primary" href="/login">Start Free →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-bg">
+    <div class="hero-grid"></div>
+    <div class="glow1"></div>
+    <div class="glow2"></div>
+  </div>
+  <div class="hero-content">
+    <div class="hero-badge">⚡ AI-Powered Infrastructure Automation</div>
+    <h1 class="hero-title">Deploy AWS Infrastructure<br>in <span class="grad">Minutes, Not Days</span></h1>
+    <p class="hero-sub">Design visually, generate production-ready Terraform with AI, and deploy to AWS with one click. No DevOps expertise required.</p>
+    <div class="hero-btns">
+      <a class="btn-hero-primary" href="/login">🚀 Start for Free</a>
+      <a class="btn-hero-outline" href="#how">See How It Works</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat-item"><div class="stat-num">200+</div><div class="stat-lbl">AWS Services</div></div>
+      <div class="stat-item"><div class="stat-num">5 min</div><div class="stat-lbl">To First Deploy</div></div>
+      <div class="stat-item"><div class="stat-num">100%</div><div class="stat-lbl">AI Generated</div></div>
+      <div class="stat-item"><div class="stat-num">$0</div><div class="stat-lbl">To Start</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- DEMO PREVIEW -->
+<div class="demo-section">
+  <div class="demo-wrap">
+    <div class="demo-screen">
+      <div class="demo-bar">
+        <div class="demo-dot" style="background:#f87171"></div>
+        <div class="demo-dot" style="background:#fbbf24"></div>
+        <div class="demo-dot" style="background:#4ade80"></div>
+        <div class="demo-url">127.0.0.1:8000 — AI DevOps Platform</div>
+      </div>
+      <div class="demo-img">
+        <div class="demo-nodes">
+          <!-- VPC container -->
+          <div style="position:absolute;left:80px;top:30px;width:420px;height:280px;border:2px dashed rgba(245,158,11,0.4);border-radius:12px;background:rgba(245,158,11,0.03)">
+            <div style="padding:8px 12px;font-size:10px;color:#f59e0b;font-weight:700">🌐 VPC — 10.0.0.0/16</div>
+          </div>
+          <!-- Nodes -->
+          <div class="demo-node" style="left:100px;top:80px;border-color:#6c47ff">
+            <div class="demo-node-ico" style="background:#FF6B2B">EC2</div>
+            <div><div style="color:#ddd;font-weight:600">Web Server</div><div style="color:#555;font-size:9px">t3.medium</div></div>
+          </div>
+          <div class="demo-node" style="left:100px;top:170px">
+            <div class="demo-node-ico" style="background:#2965CC">RDS</div>
+            <div><div style="color:#ddd;font-weight:600">Database</div><div style="color:#555;font-size:9px">db.t3.medium</div></div>
+          </div>
+          <div class="demo-node" style="left:340px;top:80px">
+            <div class="demo-node-ico" style="background:#3F8624">S3</div>
+            <div><div style="color:#ddd;font-weight:600">File Storage</div><div style="color:#555;font-size:9px">Private</div></div>
+          </div>
+          <div class="demo-node" style="left:340px;top:170px">
+            <div class="demo-node-ico" style="background:#DD344C">IAM</div>
+            <div><div style="color:#ddd;font-weight:600">IAM Role</div><div style="color:#555;font-size:9px">EC2 Access</div></div>
+          </div>
+          <div class="demo-node" style="left:580px;top:120px;border-color:#166534">
+            <div class="demo-node-ico" style="background:#8C4FFF">ALB</div>
+            <div><div style="color:#ddd;font-weight:600">Load Balancer</div><div style="color:#4ade80;font-size:9px">✓ Deployed</div></div>
+          </div>
+          <!-- Connection lines -->
+          <svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none">
+            <defs><marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#6c47ff"/></marker></defs>
+            <path d="M 230,105 C 285,105 285,105 340,105" fill="none" stroke="#6c47ff" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr)" opacity="0.6"/>
+            <path d="M 230,195 C 285,195 285,195 340,195" fill="none" stroke="#6c47ff" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr)" opacity="0.6"/>
+            <path d="M 470,105 C 520,105 520,135 580,140" fill="none" stroke="#4ade80" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arr)" opacity="0.6"/>
+          </svg>
+        </div>
+        <div class="demo-badge"><div style="width:6px;height:6px;border-radius:50%;background:#4ade80;animation:pulse 2s infinite"></div>3 services deployed to AWS</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<section class="section" id="features">
+  <div class="section-inner">
+    <div style="text-align:center;margin-bottom:0">
+      <div class="section-badge">✨ Everything you need</div>
+      <h2 class="section-title">Stop writing Terraform manually</h2>
+      <p class="section-sub" style="margin:0 auto">Our AI generates production-ready infrastructure code in seconds. You design, AI codes, you deploy.</p>
+    </div>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <div class="feat-icon" style="background:#1e1442">🗺</div>
+        <div class="feat-title">Visual Canvas Designer</div>
+        <div class="feat-desc">Drag and drop 200+ AWS services onto a canvas. Connect them to define relationships. No YAML, no JSON, no code required to design.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon" style="background:#0d2d1a">⚡</div>
+        <div class="feat-title">AI Code Generation</div>
+        <div class="feat-desc">Click Generate and AI creates complete Terraform, Docker, Kubernetes, and Ansible files instantly. Production-ready with best practices built in.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon" style="background:#1a0d2e">🚀</div>
+        <div class="feat-title">One-Click Deploy</div>
+        <div class="feat-desc">Deploy your entire infrastructure to AWS with one click. Watch live streaming logs. Deploy ALL services or individual ones. Full Terraform lifecycle.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon" style="background:#0d1d3a">☁</div>
+        <div class="feat-title">Live AWS Scanner</div>
+        <div class="feat-desc">Scan your existing AWS account and import resources to canvas. See what is running, import and manage it — all from one place.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon" style="background:#1a0a0a">🔍</div>
+        <div class="feat-title">Security Scanner</div>
+        <div class="feat-desc">Automatically scan your generated Terraform for security issues. Get HIGH, MEDIUM, LOW severity ratings with a security score out of 100.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon" style="background:#1a1200">💰</div>
+        <div class="feat-title">Cost Estimator</div>
+        <div class="feat-desc">See estimated AWS monthly costs before deploying. Know exactly what you will pay for EC2, RDS, S3, ALB, EKS and more before you deploy.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="section" id="how" style="background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+  <div class="section-inner">
+    <div style="text-align:center">
+      <div class="section-badge">🔄 Simple workflow</div>
+      <h2 class="section-title">Deploy in 4 simple steps</h2>
+      <p class="section-sub" style="margin:0 auto">From idea to running AWS infrastructure in under 10 minutes.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-title">Design on Canvas</div>
+        <div class="step-desc">Drag EC2, RDS, S3, VPC and any AWS service onto the visual canvas. Connect them to show relationships.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-title">Generate with AI</div>
+        <div class="step-desc">Click Generate All. AI creates complete Terraform code with security groups, IAM roles, and all required resources.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-title">Review & Scan</div>
+        <div class="step-desc">Review generated code in the editor. Run security scan to find issues. Check estimated monthly cost before deploying.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-title">Deploy to AWS</div>
+        <div class="step-desc">Click Deploy ALL. Watch live streaming Terraform logs. In minutes your infrastructure is running in AWS Console.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section class="section" id="pricing">
+  <div class="section-inner">
+    <div style="text-align:center">
+      <div class="section-badge">💳 Simple pricing</div>
+      <h2 class="section-title">Start free, scale as you grow</h2>
+      <p class="section-sub" style="margin:0 auto">No credit card required to start. Upgrade when you need more.</p>
+    </div>
+    <div class="pricing-grid">
+      <!-- FREE -->
+      <div class="price-card">
+        <div class="price-plan">Free</div>
+        <div style="margin-bottom:4px"><span class="price-amount">$0</span></div>
+        <div class="price-period">Forever free</div>
+        <div class="price-desc">Perfect to get started and explore the platform.</div>
+        <ul class="price-features">
+          <li><span class="pf-check">✓</span> 1 Project</li>
+          <li><span class="pf-check">✓</span> 10 Services on canvas</li>
+          <li><span class="pf-check">✓</span> AI Code Generation</li>
+          <li><span class="pf-check">✓</span> Deploy to AWS</li>
+          <li><span class="pf-check">✓</span> Security Scanner</li>
+          <li><span class="pf-x">✗</span> <span style="color:var(--muted)">GitHub Auto Push</span></li>
+          <li><span class="pf-x">✗</span> <span style="color:var(--muted)">Multiple Projects</span></li>
+          <li><span class="pf-x">✗</span> <span style="color:var(--muted)">Priority Support</span></li>
+        </ul>
+        <a class="btn-price-outline" href="/login">Get Started Free</a>
+      </div>
+      <!-- STARTER -->
+      <div class="price-card popular">
+        <div class="price-badge">Most Popular</div>
+        <div class="price-plan">Starter</div>
+        <div style="margin-bottom:4px"><span class="price-amount">$19</span><span class="price-period">/month</span></div>
+        <div class="price-desc">For developers and small teams deploying regularly.</div>
+        <ul class="price-features">
+          <li><span class="pf-check">✓</span> 5 Projects</li>
+          <li><span class="pf-check">✓</span> Unlimited Services</li>
+          <li><span class="pf-check">✓</span> AI Code Generation</li>
+          <li><span class="pf-check">✓</span> Deploy to AWS</li>
+          <li><span class="pf-check">✓</span> Security Scanner</li>
+          <li><span class="pf-check">✓</span> GitHub Auto Push</li>
+          <li><span class="pf-check">✓</span> Cost Estimator</li>
+          <li><span class="pf-x">✗</span> <span style="color:var(--muted)">Priority Support</span></li>
+        </ul>
+        <a class="btn-price-primary" href="/login">Start Starter Plan</a>
+      </div>
+      <!-- PRO -->
+      <div class="price-card">
+        <div class="price-plan">Pro</div>
+        <div style="margin-bottom:4px"><span class="price-amount">$49</span><span class="price-period">/month</span></div>
+        <div class="price-desc">For teams and companies with production infrastructure.</div>
+        <ul class="price-features">
+          <li><span class="pf-check">✓</span> Unlimited Projects</li>
+          <li><span class="pf-check">✓</span> Unlimited Services</li>
+          <li><span class="pf-check">✓</span> AI Code Generation</li>
+          <li><span class="pf-check">✓</span> Deploy to AWS</li>
+          <li><span class="pf-check">✓</span> Security Scanner</li>
+          <li><span class="pf-check">✓</span> GitHub Auto Push</li>
+          <li><span class="pf-check">✓</span> Cost Estimator</li>
+          <li><span class="pf-check">✓</span> Priority Support</li>
+        </ul>
+        <a class="btn-price-outline" href="/login">Start Pro Plan</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARE -->
+<section class="section" id="compare" style="background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+  <div class="section-inner">
+    <div style="text-align:center">
+      <div class="section-badge">🆚 Why us</div>
+      <h2 class="section-title">How we compare</h2>
+      <p class="section-sub" style="margin:0 auto">See why teams choose AI DevOps over traditional tools.</p>
+    </div>
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th class="c-highlight">AI DevOps</th>
+          <th>Terraform Manual</th>
+          <th>Humanitec</th>
+          <th>Pulumi</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Visual Canvas</td><td><span class="c-yes">✓</span></td><td><span class="c-no">✗</span></td><td><span class="c-yes">✓</span></td><td><span class="c-no">✗</span></td></tr>
+        <tr><td>AI Code Generation</td><td><span class="c-yes">✓</span></td><td><span class="c-no">✗</span></td><td><span class="c-no">✗</span></td><td><span class="c-no">✗</span></td></tr>
+        <tr><td>One-Click Deploy</td><td><span class="c-yes">✓</span></td><td><span class="c-no">✗</span></td><td><span class="c-yes">✓</span></td><td><span class="c-no">✗</span></td></tr>
+        <tr><td>Security Scanner</td><td><span class="c-yes">✓</span></td><td><span class="c-no">✗</span></td><td>Paid Add-on</td><td><span class="c-no">✗</span></td></tr>
+        <tr><td>Cost Estimator</td><td><span class="c-yes">✓</span></td><td><span class="c-no">✗</span></td><td><span class="c-no">✗</span></td><td>Paid Add-on</td></tr>
+        <tr><td>Live AWS Scanner</td><td><span class="c-yes">✓</span></td><td><span class="c-no">✗</span></td><td><span class="c-no">✗</span></td><td><span class="c-no">✗</span></td></tr>
+        <tr><td>Starting Price</td><td class="c-highlight">Free</td><td>Free (DIY)</td><td>$500/month</td><td>$50/month</td></tr>
+        <tr><td>DevOps expertise needed</td><td><span class="c-yes">No</span></td><td><span class="c-no">Yes</span></td><td><span class="c-no">Yes</span></td><td><span class="c-no">Yes</span></td></tr>
+        <tr><td>Time to first deploy</td><td class="c-highlight">5 minutes</td><td>2-3 days</td><td>1-2 weeks</td><td>1-2 days</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="cta-bg"></div>
+  <h2 class="cta-title">Ready to deploy your first<br>AWS infrastructure?</h2>
+  <p class="cta-sub">Join developers who ship infrastructure in minutes, not days.</p>
+  <div class="cta-btns">
+    <a class="btn-hero-primary" href="/login">🚀 Start for Free — No Credit Card</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-brand">
+    <div class="nav-box" style="width:28px;height:28px;font-size:13px">⚡</div>
+    <span style="font-size:14px;font-weight:700;color:#fff;margin-left:8px">AI DevOps Platform</span>
+  </div>
+  <div class="footer-txt">© 2026 AI DevOps Platform. All rights reserved.</div>
+  <div class="footer-links">
+    <a href="#">Privacy</a>
+    <a href="#">Terms</a>
+    <a href="#">Support</a>
+    <a href="/login">Login</a>
+  </div>
+</footer>
+
+<style>
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+</style>
+
+</body>
+</html>
