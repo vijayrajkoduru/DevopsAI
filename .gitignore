@@ -1,9 +1,3 @@
-# Source code — do NOT push to public repos
-main.py
-ui.html
-login.html
-landing.html
-requirements.txt
 *.db
 *.db-journal
 canvas.db
