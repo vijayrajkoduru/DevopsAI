@@ -1,0 +1,58 @@
+name: Build and Deploy DevopsAI
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: vijju5557/devopsai:latest
+
+      - name: Deploy to EC2 via SSM
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Restart app on EC2 instances
+        run: |
+          INSTANCES=$(aws ec2 describe-instances \
+            --filters "Name=tag:aws:autoscaling:groupName,Values=devopsai-ec2-asg" \
+                      "Name=instance-state-name,Values=running" \
+            --query "Reservations[*].Instances[*].InstanceId" \
+            --output text)
+
+          for INSTANCE_ID in $INSTANCES; do
+            echo "Updating instance: $INSTANCE_ID"
+            aws ssm send-command \
+              --instance-ids "$INSTANCE_ID" \
+              --document-name "AWS-RunShellScript" \
+              --parameters commands='[
+                "cd /home/ubuntu/app",
+                "echo ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }} > .env",
+                "echo STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }} >> .env",
+                "echo STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }} >> .env",
+                "docker pull vijju5557/devopsai:latest",
+                "docker compose down",
+                "docker compose up -d"
+              ]' \
+              --region us-east-1
+          done
