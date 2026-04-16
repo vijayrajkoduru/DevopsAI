@@ -39,7 +39,7 @@ client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 # Always resolve paths relative to this file — works no matter where uvicorn is started from
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "generated")
-DB_PATH    = os.path.join(BASE_DIR, "canvas.db")
+DB_PATH    = os.path.join(BASE_DIR, "data", "canvas.db")
 
 def _open(filename):
     return open(os.path.join(BASE_DIR, filename), "r", encoding="utf-8")
@@ -47,6 +47,7 @@ def _open(filename):
 # ── DATABASE INIT ──────────────────────────────────────────────────────────────
 
 def init_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS canvases (

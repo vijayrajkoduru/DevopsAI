@@ -9,7 +9,7 @@ services:
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
     volumes:
       - app_data:/app/generated
-      - app_db:/app/canvas.db
+      - app_db:/app/data
 
   nginx:
     image: nginx:latest
