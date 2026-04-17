@@ -92,7 +92,6 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
 @keyframes glow-green{from{box-shadow:0 0 6px rgba(74,222,128,0.4),0 0 0 2px rgba(74,222,128,0.15)}to{box-shadow:0 0 18px rgba(74,222,128,0.7),0 0 0 4px rgba(74,222,128,0.25)}}
 .node.suggest-connect{border-color:#60a5fa!important;animation:glow-blue 1s ease infinite alternate}
 @keyframes glow-blue{from{box-shadow:0 0 5px rgba(96,165,250,0.3),0 0 0 2px rgba(96,165,250,0.1)}to{box-shadow:0 0 14px rgba(96,165,250,0.6),0 0 0 3px rgba(96,165,250,0.2)}}
-.node-ring{position:absolute;top:-9px;right:-9px;width:22px;height:22px;pointer-events:none;z-index:20}
 .connect-tip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#0d1f0d;border:1px solid #4ade80;border-radius:5px;padding:2px 7px;font-size:9px;color:#4ade80;white-space:nowrap;z-index:30;pointer-events:none;display:none}
 .node.can-connect .connect-tip{display:block}
 .node.suggest-connect .connect-tip{display:block;background:#0d1428;border-color:#60a5fa;color:#60a5fa}
@@ -1310,8 +1309,31 @@ function onDragEnd(e){
   if(e.clientX>rect.left&&e.clientX<rect.right&&e.clientY>rect.top&&e.clientY<rect.bottom){
     var cx=(e.clientX-rect.left-panX)/zoom-80;
     var cy=(e.clientY-rect.top-panY)/zoom-40;
-    createNode(dragging,cx,cy);
+    var droppedMeta=dragging;
+    createNode(droppedMeta,cx,cy);
     document.getElementById("hint").style.display="none";
+    // Auto-connect to compatible nodes already on canvas
+    setTimeout(function(){
+      var newId="n"+nc;
+      if(!nodes[newId])return;
+      var targets=getCompatGroups(droppedMeta);
+      var connected=[];
+      Object.keys(nodes).forEach(function(oid){
+        if(oid===newId)return;
+        var og=(nodes[oid].meta.group||nodes[oid].meta.grp||"").toLowerCase();
+        if(targets.indexOf(og)<0)return;
+        var compat=getCompat(droppedMeta.group||droppedMeta.grp||"",nodes[oid].meta.group||nodes[oid].meta.grp||"");
+        if(!compat.ok)return;
+        var already=conns.some(function(c){return (c.f===newId&&c.t===oid)||(c.t===newId&&c.f===oid);});
+        if(already)return;
+        conns.push({f:newId,t:oid});
+        connected.push(nodes[oid].meta.label);
+      });
+      if(connected.length){
+        drawLines();updateReadiness();
+        showNotif("ok","Auto-connected!",droppedMeta.label+" connected to "+connected.join(", "),"You can adjust connections anytime.",3500);
+      }
+    },80);
   }
   cleanDrag();
 }
@@ -1407,34 +1429,20 @@ function getNodeReadinessPct(nid){
 }
 function updateReadiness(){
   var nids=Object.keys(nodes);
-  if(!nids.length){
-    var rb=document.getElementById("readiness-badge");if(rb)rb.style.display="none";
-    return;
-  }
-  var totalPct=0;
-  nids.forEach(function(nid){
-    var pct=Math.min(getNodeReadinessPct(nid),100);
-    totalPct+=pct;
-    var arc=document.getElementById(nid+"-rarc");
-    if(!arc)return;
-    var circ=50.27;
-    var dash=Math.round((pct/100)*circ);
-    arc.setAttribute("stroke-dasharray",dash+" "+circ);
-    var col=pct>=80?"#4ade80":pct>=50?"#fbbf24":"#f87171";
-    arc.setAttribute("stroke",col);
-  });
-  var avg=Math.round(totalPct/nids.length);
   var rb=document.getElementById("readiness-badge");
+  if(!nids.length){if(rb)rb.style.display="none";return;}
+  var totalPct=0;
+  nids.forEach(function(nid){totalPct+=Math.min(getNodeReadinessPct(nid),100);});
+  var avg=Math.round(totalPct/nids.length);
   var arc2=document.getElementById("readiness-arc");
   var pctEl=document.getElementById("readiness-pct");
   var lblEl=document.getElementById("readiness-label");
   if(!rb||!arc2||!pctEl||!lblEl)return;
   rb.style.display="flex";
-  var circ=50.27;
-  arc2.setAttribute("stroke-dasharray",Math.round((avg/100)*circ)+" "+circ);
-  var col2=avg>=80?"#4ade80":avg>=50?"#fbbf24":"#f87171";
-  arc2.setAttribute("stroke",col2);
-  pctEl.style.color=col2;pctEl.textContent=avg+"%";
+  arc2.setAttribute("stroke-dasharray",Math.round((avg/100)*50.27)+" 50.27");
+  var col=avg>=80?"#4ade80":avg>=50?"#fbbf24":"#f87171";
+  arc2.setAttribute("stroke",col);
+  pctEl.style.color=col;pctEl.textContent=avg+"%";
   var remaining=nids.filter(function(nid){return getNodeReadinessPct(nid)<80;}).length;
   lblEl.textContent=remaining>0?remaining+" services need connections":"Enterprise Ready";
   lblEl.style.color=remaining>0?"#fbbf24":"#4ade80";
@@ -1637,11 +1645,7 @@ function createNode(meta,x,y){
   head.appendChild(info);
   var foot=document.createElement("div");foot.className="node-foot";
   foot.innerHTML='<div class="ndot" id="'+id+'-dot"></div><span class="node-st" id="'+id+'-st">Click to configure</span><span class="cost-badge" id="'+id+'-cost">'+getNodeCost(meta.id,{})+'</span><div class="conn-btn" id="'+id+'-cbtn">+</div>';
-  // Readiness ring (top-right corner)
-  var ring=document.createElement("div");ring.className="node-ring";ring.id=id+"-ring";
-  ring.innerHTML='<svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="8" fill="none" stroke="#1e1e30" stroke-width="2.5"/><circle id="'+id+'-rarc" cx="11" cy="11" r="8" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-dasharray="0 50.27" stroke-linecap="round" transform="rotate(-90 11 11)" style="transition:stroke-dasharray 0.5s ease,stroke 0.4s"/></svg>';
-  el.appendChild(ring);
-  // Connect tip label
+  // Connect tip label (for drag/select highlight)
   var tip=document.createElement("div");tip.className="connect-tip";
   el.appendChild(tip);
   el.appendChild(head);el.appendChild(foot);
