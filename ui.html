@@ -1358,11 +1358,12 @@ function vpcClicked(id){
   if(!vpcConnFrom)return;
   if(vpcConnFrom===id){vpcConnFrom=null;document.querySelectorAll(".vpc-container").forEach(function(v){v.style.outline="";});showNotif("warn","Same VPC","Select a different VPC.",null,3000);return;}
   for(var i=0;i<vpcConns.length;i++){var c=vpcConns[i];if((c.f===vpcConnFrom&&c.t===id)||(c.f===id&&c.t===vpcConnFrom)){showNotif("warn","Already peered","These VPCs are already connected.",null,3000);vpcConnFrom=null;document.querySelectorAll(".vpc-container").forEach(function(v){v.style.outline="";});return;}}
-  vpcConns.push({f:vpcConnFrom,t:id});
+  var fId=vpcConnFrom, tId=id;
+  vpcConns.push({f:fId,t:tId});
   document.querySelectorAll(".vpc-container").forEach(function(v){v.style.outline="";});
-  showNotif("ok","VPC Peering Created!",vpcs[vpcConnFrom].name+" ⇌ "+vpcs[id].name,"A VPC peering connection has been established.",4000);
   vpcConnFrom=null;
   drawLines();
+  showVPCPeeringForm(fId,tId);
 }
 function addAZ(){
   var id="az"+(++ac);
@@ -1469,6 +1470,45 @@ function nodeClicked(id){
   cancelConnect();drawLines();
   if(selId)selectNode(selId);
 }
+function showVPCPeeringForm(fId,tId){
+  var a=vpcs[fId],b=vpcs[tId];
+  if(!a||!b)return;
+  var overlay=document.createElement("div");
+  overlay.id="vpc-peer-overlay";
+  overlay.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center";
+  overlay.innerHTML='<div style="background:#0f0f1a;border:1px solid #f59e0b;border-radius:14px;padding:28px;width:420px;max-width:95vw">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">'
+    +'<span style="font-size:20px">⇌</span>'
+    +'<span style="font-size:15px;font-weight:700;color:#f59e0b">VPC Peering Configuration</span>'
+    +'<span onclick="document.getElementById(\'vpc-peer-overlay\').remove()" style="margin-left:auto;cursor:pointer;color:#555;font-size:18px">✕</span></div>'
+    +'<div style="margin-bottom:12px"><label style="font-size:10px;color:#666;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">'+a.name+' CIDR</label>'
+    +'<input id="vp-cidr1" type="text" value="'+a.cidr+'" style="width:100%;background:#060610;border:1px solid #2a1a00;border-radius:7px;padding:9px 12px;color:#ddd;font-size:13px;font-family:monospace;outline:none;box-sizing:border-box"></div>'
+    +'<div style="margin-bottom:12px"><label style="font-size:10px;color:#666;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">'+b.name+' CIDR</label>'
+    +'<input id="vp-cidr2" type="text" value="'+b.cidr+'" style="width:100%;background:#060610;border:1px solid #2a1a00;border-radius:7px;padding:9px 12px;color:#ddd;font-size:13px;font-family:monospace;outline:none;box-sizing:border-box"></div>'
+    +'<div style="margin-bottom:20px"><label style="font-size:10px;color:#666;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">Peering Connection Name</label>'
+    +'<input id="vp-name" type="text" value="'+a.name+'-to-'+b.name+'" style="width:100%;background:#060610;border:1px solid #2a1a00;border-radius:7px;padding:9px 12px;color:#ddd;font-size:13px;font-family:monospace;outline:none;box-sizing:border-box"></div>'
+    +'<div style="display:flex;gap:10px">'
+    +'<button onclick="saveVPCPeering(\''+fId+'\',\''+tId+'\')" style="flex:1;padding:11px;background:linear-gradient(135deg,#92400e,#f59e0b);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">💾 Save Peering</button>'
+    +'<button onclick="document.getElementById(\'vpc-peer-overlay\').remove()" style="padding:11px 16px;background:#13131f;border:1px solid #2a2a40;border-radius:8px;color:#888;font-size:13px;cursor:pointer">Skip</button>'
+    +'</div></div>';
+  document.body.appendChild(overlay);
+}
+function saveVPCPeering(fId,tId){
+  for(var i=0;i<vpcConns.length;i++){
+    var c=vpcConns[i];
+    if((c.f===fId&&c.t===tId)||(c.f===tId&&c.t===fId)){
+      c.cidr1=document.getElementById("vp-cidr1").value.trim();
+      c.cidr2=document.getElementById("vp-cidr2").value.trim();
+      c.name=document.getElementById("vp-name").value.trim();
+      if(vpcs[fId])vpcs[fId].cidr=c.cidr1;
+      if(vpcs[tId])vpcs[tId].cidr=c.cidr2;
+      break;
+    }
+  }
+  document.getElementById("vpc-peer-overlay").remove();
+  showNotif("ok","VPC Peering Saved!",vpcs[fId].name+" ⇌ "+vpcs[tId].name,"Peering configuration saved.",3000);
+  drawLines();
+}
 function cancelConnect(){
   connFrom=null;
   document.querySelectorAll(".node").forEach(function(n){n.classList.remove("conn-src");});
@@ -1486,26 +1526,44 @@ function drawLines(){
   svg.innerHTML="";
   var defs=document.createElementNS("http://www.w3.org/2000/svg","defs");
   defs.innerHTML='<marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#a78bfa"/></marker>'
-    +'<marker id="arr-vpc" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b"/></marker>';
+    +'<marker id="arr-vpc-e" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b"/></marker>'
+    +'<marker id="arr-vpc-s" markerWidth="8" markerHeight="8" refX="2" refY="3" orient="auto-start-reverse"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b"/></marker>';
   svg.appendChild(defs);
-  // Draw VPC peering lines
+  // Draw VPC peering lines (edge-to-edge, bidirectional)
   for(var p=0;p<vpcConns.length;p++){
     (function(c){
       var a=vpcs[c.f],b=vpcs[c.t];
       if(!a||!b)return;
-      var ax=a.x+a.w/2,ay=a.y+a.h/2;
-      var bx=b.x+b.w/2,by=b.y+b.h/2;
+      // Find closest edges
+      var acx=a.x+a.w/2, acy=a.y+a.h/2;
+      var bcx=b.x+b.w/2, bcy=b.y+b.h/2;
+      var ax,ay,bx,by;
+      var dx=bcx-acx, dy=bcy-acy;
+      if(Math.abs(dx)>=Math.abs(dy)){
+        ax=dx>0?a.x+a.w:a.x; ay=acy;
+        bx=dx>0?b.x:b.x+b.w; by=bcy;
+      } else {
+        ax=acx; ay=dy>0?a.y+a.h:a.y;
+        bx=bcx; by=dy>0?b.y:b.y+b.h;
+      }
       var mx=(ax+bx)/2;
       var path=document.createElementNS("http://www.w3.org/2000/svg","path");
       path.setAttribute("d","M"+ax+","+ay+" C"+mx+","+ay+" "+mx+","+by+" "+bx+","+by);
       path.setAttribute("fill","none");path.setAttribute("stroke","#f59e0b");path.setAttribute("stroke-width","2");
-      path.setAttribute("stroke-dasharray","8 4");path.setAttribute("marker-end","url(#arr-vpc)");path.setAttribute("opacity","0.8");
+      path.setAttribute("stroke-dasharray","8 4");
+      path.setAttribute("marker-end","url(#arr-vpc-e)");
+      path.setAttribute("marker-start","url(#arr-vpc-s)");
+      path.setAttribute("opacity","0.85");
       var anim=document.createElementNS("http://www.w3.org/2000/svg","animate");
       anim.setAttribute("attributeName","stroke-dashoffset");anim.setAttribute("from","0");anim.setAttribute("to","-24");anim.setAttribute("dur","1.5s");anim.setAttribute("repeatCount","indefinite");
       path.appendChild(anim);svg.appendChild(path);
-      var lx=(ax+bx)/2,ly=(ay+by)/2;
+      var lx=(ax+bx)/2, ly=(ay+by)/2;
+      var bg=document.createElementNS("http://www.w3.org/2000/svg","rect");
+      var lw=72,lh=14;
+      bg.setAttribute("x",lx-lw/2);bg.setAttribute("y",ly-lh-2);bg.setAttribute("width",lw);bg.setAttribute("height",lh);bg.setAttribute("rx","4");bg.setAttribute("fill","#1a1000");bg.setAttribute("opacity","0.85");
+      svg.appendChild(bg);
       var lbl=document.createElementNS("http://www.w3.org/2000/svg","text");
-      lbl.setAttribute("x",lx);lbl.setAttribute("y",ly-8);lbl.setAttribute("text-anchor","middle");lbl.setAttribute("font-size","9");lbl.setAttribute("fill","#f59e0b");lbl.setAttribute("font-family","monospace");lbl.textContent="VPC Peering";
+      lbl.setAttribute("x",lx);lbl.setAttribute("y",ly-6);lbl.setAttribute("text-anchor","middle");lbl.setAttribute("font-size","9");lbl.setAttribute("fill","#f59e0b");lbl.setAttribute("font-family","monospace");lbl.setAttribute("font-weight","600");lbl.textContent="⇌ VPC Peering";
       svg.appendChild(lbl);
     })(vpcConns[p]);
   }
