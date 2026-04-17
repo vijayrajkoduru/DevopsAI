@@ -1560,43 +1560,158 @@ function nodeClicked(id){
   cancelConnect();drawLines();
   if(selId)selectNode(selId);
 }
+// Service default ports for auto-suggestion
+var SVC_PORTS={
+  ec2_instance:"22,80,443",ec2_asg:"80,443",alb:"80,443",nlb:"80,443",
+  rds_mysql:"3306",rds_postgres:"5432",rds_aurora:"3306",rds_mssql:"1433",
+  elasticache_redis:"6379",elasticache_memcached:"11211",
+  eks_cluster:"443,10250",ecs_fargate:"80,443",lambda:"443",
+  s3_bucket:"443",api_gw:"443",sqs:"443",sns:"443",
+  mongo_ec2:"27017",kafka_msk:"9092,9094",elasticsearch:"9200,9300",
+};
+function getServicesInVPC(vpcId){
+  var vpc=vpcs[vpcId]; if(!vpc)return [];
+  return Object.values(nodes).filter(function(n){
+    return n.x>=vpc.x&&n.x<=vpc.x+vpc.w&&n.y>=vpc.y&&n.y<=vpc.y+vpc.h;
+  });
+}
+function getDefaultPort(svcId){
+  var id=(svcId||"").toLowerCase();
+  for(var k in SVC_PORTS){if(id.indexOf(k)>=0||k.indexOf(id)>=0)return SVC_PORTS[k];}
+  return "443";
+}
 function showVPCPeeringForm(fId,tId){
-  var a=vpcs[fId],b=vpcs[tId];
-  if(!a||!b)return;
+  var a=vpcs[fId],b=vpcs[tId]; if(!a||!b)return;
+  var sA=getServicesInVPC(fId), sB=getServicesInVPC(tId);
+  var old=document.getElementById("vpc-peer-overlay"); if(old)old.remove();
+
+  // Build service list HTML for each VPC
+  function svcBadge(n){return '<span style="display:inline-block;background:#1a1a2e;border:1px solid #2a2a40;border-radius:4px;padding:2px 7px;font-size:10px;color:#a78bfa;margin:2px">'+n.meta.label+'</span>';}
+
+  // Build access rules rows
+  var rulesHtml='';
+  if(sA.length&&sB.length){
+    sA.forEach(function(na,i){
+      sB.forEach(function(nb,j){
+        var ruleId='vpr_'+i+'_'+j;
+        var defPort=getDefaultPort(na.meta.id)||getDefaultPort(nb.meta.id)||"443";
+        rulesHtml+='<div id="row_'+ruleId+'" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;margin-bottom:6px;background:#0a0a18;border:1px solid #1e1e30">'
+          +'<input type="checkbox" id="chk_'+ruleId+'" checked style="cursor:pointer;accent-color:#4ade80;width:14px;height:14px">'
+          +'<span style="font-size:11px;color:#c4b5fd;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+na.meta.label+'</span>'
+          +'<select id="dir_'+ruleId+'" style="background:#060610;border:1px solid #2a2a40;border-radius:5px;color:#ddd;font-size:11px;padding:3px 6px;cursor:pointer">'
+          +'<option value="both">⇌ Both</option><option value="atob">→ '+a.name+'→'+b.name+'</option><option value="btoa">← '+b.name+'→'+a.name+'</option>'
+          +'</select>'
+          +'<span style="font-size:11px;color:#c4b5fd;flex:1;text-align:right;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+nb.meta.label+'</span>'
+          +'<input id="port_'+ruleId+'" type="text" value="'+defPort+'" placeholder="ports" style="width:80px;background:#060610;border:1px solid #2a2a40;border-radius:5px;color:#ddd;font-size:10px;padding:3px 6px;font-family:monospace">'
+          +'<select id="act_'+ruleId+'" style="background:#060610;border:1px solid #2a2a40;border-radius:5px;font-size:10px;padding:3px 6px;cursor:pointer;font-weight:700">'
+          +'<option value="allow" style="color:#4ade80">✓ Allow</option><option value="deny" style="color:#f87171">✗ Deny</option>'
+          +'</select>'
+          +'</div>';
+      });
+    });
+  } else {
+    rulesHtml='<div style="padding:14px;text-align:center;color:#555;font-size:12px">No services detected inside these VPCs.<br>Drag services inside the VPC boxes first for auto-analysis.</div>';
+  }
+
   var overlay=document.createElement("div");
   overlay.id="vpc-peer-overlay";
-  overlay.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center";
-  overlay.innerHTML='<div style="background:#0f0f1a;border:1px solid #f59e0b;border-radius:14px;padding:28px;width:420px;max-width:95vw">'
-    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">'
-    +'<span style="font-size:20px">⇌</span>'
-    +'<span style="font-size:15px;font-weight:700;color:#f59e0b">VPC Peering Configuration</span>'
-    +'<span onclick="document.getElementById(\'vpc-peer-overlay\').remove()" style="margin-left:auto;cursor:pointer;color:#555;font-size:18px">✕</span></div>'
-    +'<div style="margin-bottom:12px"><label style="font-size:10px;color:#666;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">'+a.name+' CIDR</label>'
-    +'<input id="vp-cidr1" type="text" value="'+a.cidr+'" style="width:100%;background:#060610;border:1px solid #2a1a00;border-radius:7px;padding:9px 12px;color:#ddd;font-size:13px;font-family:monospace;outline:none;box-sizing:border-box"></div>'
-    +'<div style="margin-bottom:12px"><label style="font-size:10px;color:#666;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">'+b.name+' CIDR</label>'
-    +'<input id="vp-cidr2" type="text" value="'+b.cidr+'" style="width:100%;background:#060610;border:1px solid #2a1a00;border-radius:7px;padding:9px 12px;color:#ddd;font-size:13px;font-family:monospace;outline:none;box-sizing:border-box"></div>'
-    +'<div style="margin-bottom:20px"><label style="font-size:10px;color:#666;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">Peering Connection Name</label>'
-    +'<input id="vp-name" type="text" value="'+a.name+'-to-'+b.name+'" style="width:100%;background:#060610;border:1px solid #2a1a00;border-radius:7px;padding:9px 12px;color:#ddd;font-size:13px;font-family:monospace;outline:none;box-sizing:border-box"></div>'
+  overlay.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:20px;box-sizing:border-box";
+  overlay.innerHTML='<div style="background:#0d0d1a;border:1px solid #f59e0b;border-radius:16px;padding:28px;width:640px;max-width:98vw;max-height:90vh;overflow-y:auto">'
+    // Header
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:22px">'
+    +'<span style="font-size:22px">⇌</span>'
+    +'<div><div style="font-size:16px;font-weight:800;color:#f59e0b">VPC Peering Wizard</div><div style="font-size:10px;color:#555;margin-top:2px">Configure access rules between '+a.name+' and '+b.name+'</div></div>'
+    +'<span onclick="document.getElementById(\'vpc-peer-overlay\').remove()" style="margin-left:auto;cursor:pointer;color:#555;font-size:20px;line-height:1">✕</span></div>'
+
+    // Step 1: Basic
+    +'<div style="font-size:10px;color:#f59e0b;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:10px">① Connection Details</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div><label style="font-size:10px;color:#666;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">'+a.name+' CIDR</label>'
+    +'<input id="vp-cidr1" type="text" value="'+a.cidr+'" class="vault-inp"></div>'
+    +'<div><label style="font-size:10px;color:#666;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">'+b.name+' CIDR</label>'
+    +'<input id="vp-cidr2" type="text" value="'+b.cidr+'" class="vault-inp"></div>'
+    +'</div>'
+    +'<div style="margin-bottom:18px"><label style="font-size:10px;color:#666;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Peering Connection Name</label>'
+    +'<input id="vp-name" type="text" value="'+a.name.toLowerCase().replace(/\s+/g,'-')+'-to-'+b.name.toLowerCase().replace(/\s+/g,'-')+'" class="vault-inp"></div>'
+
+    // Step 2: Services
+    +'<div style="font-size:10px;color:#f59e0b;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:10px">② Services Detected</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">'
+    +'<div style="background:#060610;border:1px solid #1e1e30;border-radius:8px;padding:10px">'
+    +'<div style="font-size:10px;color:#f59e0b;font-weight:700;margin-bottom:6px">'+a.name+' ('+sA.length+' services)</div>'
+    +(sA.length?sA.map(svcBadge).join(''):'<span style="font-size:10px;color:#444">No services inside</span>')
+    +'</div>'
+    +'<div style="background:#060610;border:1px solid #1e1e30;border-radius:8px;padding:10px">'
+    +'<div style="font-size:10px;color:#f59e0b;font-weight:700;margin-bottom:6px">'+b.name+' ('+sB.length+' services)</div>'
+    +(sB.length?sB.map(svcBadge).join(''):'<span style="font-size:10px;color:#444">No services inside</span>')
+    +'</div></div>'
+
+    // Step 3: Access Rules
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
+    +'<div style="font-size:10px;color:#f59e0b;text-transform:uppercase;letter-spacing:1px;font-weight:700">③ Access Rules <span style="color:#555;font-weight:400">(Service → Service)</span></div>'
+    +'<div style="display:flex;gap:6px">'
+    +'<button onclick="vprSetAll(\'allow\')" style="font-size:10px;padding:3px 8px;background:#0a2a0a;border:1px solid #166534;border-radius:5px;color:#4ade80;cursor:pointer">✓ Allow All</button>'
+    +'<button onclick="vprSetAll(\'deny\')" style="font-size:10px;padding:3px 8px;background:#2a0a0a;border:1px solid #5a1a1a;border-radius:5px;color:#f87171;cursor:pointer">✗ Deny All</button>'
+    +'</div></div>'
+    +'<div id="vpr-rules" style="max-height:220px;overflow-y:auto;padding-right:4px">'+rulesHtml+'</div>'
+
+    // Step 4: Global restriction
+    +'<div style="font-size:10px;color:#f59e0b;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-top:18px;margin-bottom:10px">④ Global Restriction</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">'
+    +'<div><label style="font-size:10px;color:#666;display:block;margin-bottom:4px">Restrict VPC1 access to CIDR</label>'
+    +'<input id="vp-restrict1" type="text" placeholder="0.0.0.0/0 = no restriction" class="vault-inp" style="font-size:11px"></div>'
+    +'<div><label style="font-size:10px;color:#666;display:block;margin-bottom:4px">Restrict VPC2 access to CIDR</label>'
+    +'<input id="vp-restrict2" type="text" placeholder="0.0.0.0/0 = no restriction" class="vault-inp" style="font-size:11px"></div>'
+    +'</div>'
+
+    // Footer
     +'<div style="display:flex;gap:10px">'
-    +'<button onclick="saveVPCPeering(\''+fId+'\',\''+tId+'\')" style="flex:1;padding:11px;background:linear-gradient(135deg,#92400e,#f59e0b);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">💾 Save Peering</button>'
-    +'<button onclick="document.getElementById(\'vpc-peer-overlay\').remove()" style="padding:11px 16px;background:#13131f;border:1px solid #2a2a40;border-radius:8px;color:#888;font-size:13px;cursor:pointer">Skip</button>'
+    +'<button onclick="saveVPCPeering(\''+fId+'\',\''+tId+'\')" style="flex:1;padding:12px;background:linear-gradient(135deg,#92400e,#f59e0b);border:none;border-radius:9px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">💾 Save Full Configuration</button>'
+    +'<button onclick="document.getElementById(\'vpc-peer-overlay\').remove()" style="padding:12px 18px;background:#13131f;border:1px solid #2a2a40;border-radius:9px;color:#888;font-size:13px;cursor:pointer">Skip</button>'
     +'</div></div>';
   document.body.appendChild(overlay);
+  // Store rule IDs for save
+  window._vprSvcA=sA; window._vprSvcB=sB;
+}
+function vprSetAll(action){
+  document.querySelectorAll('[id^="act_vpr_"]').forEach(function(el){el.value=action;});
+  document.querySelectorAll('[id^="chk_vpr_"]').forEach(function(el){el.checked=true;});
 }
 function saveVPCPeering(fId,tId){
+  var sA=window._vprSvcA||[], sB=window._vprSvcB||[];
+  var rules=[];
+  sA.forEach(function(na,i){
+    sB.forEach(function(nb,j){
+      var ruleId='vpr_'+i+'_'+j;
+      var chk=document.getElementById("chk_"+ruleId);
+      if(!chk||!chk.checked)return;
+      rules.push({
+        from:na.meta.label, fromId:na.id,
+        to:nb.meta.label, toId:nb.id,
+        direction:document.getElementById("dir_"+ruleId).value,
+        ports:document.getElementById("port_"+ruleId).value.trim(),
+        action:document.getElementById("act_"+ruleId).value
+      });
+    });
+  });
   for(var i=0;i<vpcConns.length;i++){
     var c=vpcConns[i];
     if((c.f===fId&&c.t===tId)||(c.f===tId&&c.t===fId)){
       c.cidr1=document.getElementById("vp-cidr1").value.trim();
       c.cidr2=document.getElementById("vp-cidr2").value.trim();
       c.name=document.getElementById("vp-name").value.trim();
+      c.restrict1=document.getElementById("vp-restrict1").value.trim();
+      c.restrict2=document.getElementById("vp-restrict2").value.trim();
+      c.rules=rules;
       if(vpcs[fId])vpcs[fId].cidr=c.cidr1;
       if(vpcs[tId])vpcs[tId].cidr=c.cidr2;
       break;
     }
   }
   document.getElementById("vpc-peer-overlay").remove();
-  showNotif("ok","VPC Peering Saved!",vpcs[fId].name+" ⇌ "+vpcs[tId].name,"Peering configuration saved.",3000);
+  var allowed=rules.filter(function(r){return r.action==="allow";}).length;
+  var denied=rules.filter(function(r){return r.action==="deny";}).length;
+  showNotif("ok","VPC Peering Configured!",vpcs[fId].name+" ⇌ "+vpcs[tId].name,allowed+" connections allowed · "+denied+" restricted",4000);
   drawLines();
 }
 function cancelConnect(){
