@@ -2094,51 +2094,107 @@ function validateArchitecture(){
     return other&&other.meta.group===group;
   });}
 
-  // ── SMART CONNECTION RULES: what each service type should connect to ──
-  var SMART_CONNECT={
-    prometheus:   {groups:["compute","k8s","serverless","database","monitoring"],why:"Prometheus scrapes metrics from all running services — connect it to every service you want to monitor."},
-    cloudwatch:   {groups:["compute","database","serverless","k8s","network"],why:"CloudWatch collects logs and metrics from AWS services."},
-    grafana:      {groups:["monitoring"],targets:["prometheus","cloudwatch"],why:"Grafana visualises metrics — connect it to Prometheus or CloudWatch as data sources."},
-    alb:          {groups:["compute","k8s","serverless"],why:"ALB distributes traffic to backend compute or containers."},
-    nlb:          {groups:["compute","k8s"],why:"NLB forwards TCP traffic to compute instances."},
-    rds_mysql:    {groups:["compute","serverless","k8s"],why:"RDS is accessed by application servers — connect it to EC2, Lambda, or EKS."},
-    rds_postgres: {groups:["compute","serverless","k8s"],why:"RDS PostgreSQL needs an application server to query it."},
-    rds_aurora:   {groups:["compute","serverless","k8s"],why:"Aurora needs an application layer to read/write data."},
-    dynamodb:     {groups:["serverless","compute","k8s"],why:"DynamoDB is typically accessed by Lambda or application servers."},
-    elasticache_redis:{groups:["compute","serverless","k8s"],why:"Redis sits in front of your database — connect it to your application layer."},
-    s3_bucket:    {groups:["compute","serverless","cdn"],why:"S3 is used by apps for storage and by CloudFront as an origin."},
-    cloudfront:   {groups:["storage","compute","serverless"],targets:["s3_bucket","alb"],why:"CloudFront needs an origin — connect it to S3 or ALB."},
-    waf:          {groups:["network"],targets:["alb","cloudfront"],why:"WAF protects your ALB or CloudFront distribution — connect it to one of those."},
-    api_gw:       {groups:["serverless","compute"],why:"API Gateway routes requests to Lambda or EC2 backends."},
-    lambda:       {groups:["database","storage","compute"],why:"Lambda functions usually read/write to databases, S3, or trigger from other services."},
-    vpc_nat:      {groups:["compute","network"],why:"NAT Gateway lets private instances reach the internet — connect it to EC2 in private subnets."},
-    sqs:          {groups:["serverless","compute"],why:"SQS queues messages between producers and consumers — connect source and destination services."},
-    sns:          {groups:["serverless","compute","storage"],why:"SNS fans out notifications to subscribers like Lambda, SQS, or email."},
-    elasticsearch:{groups:["compute","serverless"],why:"Elasticsearch indexes data from your application — connect it to your backend services."},
-    kafka_msk:    {groups:["compute","serverless","k8s"],why:"Kafka streams data between producers and consumers in your architecture."},
+  // ── SMART CONNECTION RULES ──
+  // Group-level map: what groups each group should connect to + explanation
+  var GROUP_CONNECT_MAP={
+    compute:   {groups:["database","network","monitoring","security","storage","messaging","api"],        why:"EC2/compute instances connect to databases, load balancers, monitoring, security layers, and storage."},
+    serverless:{groups:["database","storage","network","api","messaging","monitoring","security","streaming"],why:"Lambda functions typically connect to databases, S3, API Gateway, SQS/SNS, and monitoring services."},
+    container: {groups:["network","database","storage","monitoring","registry","k8s","security","messaging"],why:"Containers need a network layer, database, storage, and monitoring to function in production."},
+    k8s:       {groups:["network","database","storage","monitoring","security","messaging","streaming","registry"],why:"Kubernetes workloads connect to ingress, databases, persistent storage, monitoring, and registries."},
+    database:  {groups:["compute","serverless","container","k8s","monitoring","security","cache"],        why:"Databases are accessed by application servers — connect to compute, Lambda, or containers."},
+    cache:     {groups:["compute","serverless","k8s","database"],                                         why:"Cache (Redis/Memcached) sits between your app and database to reduce load."},
+    storage:   {groups:["compute","serverless","container","network","cicd","monitoring"],                 why:"S3/storage is accessed by apps, CI/CD pipelines, and CloudFront for static content."},
+    network:   {groups:["compute","serverless","container","k8s","security","database"],                  why:"Load balancers and network services route traffic to backend compute or containers."},
+    api:       {groups:["serverless","compute","container","k8s","security","database"],                  why:"API Gateway routes requests to Lambda, EC2, or containers — connect to backend services."},
+    security:  {groups:["network","compute","database","serverless","k8s","container","api"],             why:"Security services (IAM, WAF, KMS, Secrets) protect all layers of your architecture."},
+    auth:      {groups:["compute","serverless","network","k8s","api","container"],                        why:"Auth services (Keycloak, Cognito) authenticate users accessing your application layer."},
+    monitoring:{groups:["compute","database","serverless","k8s","container","network","storage","messaging","streaming"],why:"Monitoring scrapes metrics and logs from every service — connect it to all services you want to observe."},
+    messaging: {groups:["compute","serverless","k8s","container","streaming","database","monitoring"],    why:"Message queues (SQS/SNS/RabbitMQ) connect producers and consumers in your architecture."},
+    streaming: {groups:["compute","serverless","k8s","container","database","messaging","monitoring"],    why:"Kafka/Kinesis streams connect data producers to consumers and storage systems."},
+    cicd:      {groups:["compute","container","k8s","storage","iac","gitops","registry","monitoring"],    why:"CI/CD pipelines build, test, and deploy to compute, containers, and registries."},
+    gitops:    {groups:["k8s","container","cicd","iac","registry"],                                       why:"GitOps tools (ArgoCD, Flux) sync with Kubernetes clusters and registries."},
+    iac:       {groups:["compute","database","network","storage","k8s","container","monitoring"],         why:"Terraform/IaC modules provision and manage all infrastructure resources."},
+    cfgmgmt:   {groups:["compute","container","k8s","network"],                                          why:"Ansible/config management configures servers, containers, and Kubernetes nodes."},
+    proxy:     {groups:["network","compute","container","k8s","api","monitoring"],                        why:"Proxies (Traefik, HAProxy) sit in front of your services and route traffic."},
+    mesh:      {groups:["k8s","container","network","monitoring","security"],                             why:"Service meshes (Istio, Linkerd) manage traffic between microservices — connect to your k8s workloads."},
+    registry:  {groups:["container","k8s","cicd"],                                                       why:"Container registries (ECR, Nexus) store images used by containers and deployed by CI/CD."},
+  };
+
+  // Service-specific overrides (take priority over group map)
+  var SVC_CONNECT_OVERRIDES={
+    prometheus:     {groups:["compute","k8s","serverless","database","container","messaging","streaming"],why:"Prometheus scrapes metrics from all services — connect it to every service you want to monitor."},
+    grafana:        {targets:["prometheus","cloudwatch","loki"],groups:["monitoring"],              why:"Grafana needs a data source — connect it to Prometheus or CloudWatch."},
+    loki:           {groups:["compute","k8s","container","serverless"],                             why:"Loki collects logs from your services — connect it to all services you want to log."},
+    alertmanager:   {targets:["prometheus"],groups:["monitoring","messaging"],                     why:"Alertmanager receives alerts from Prometheus and routes them to Slack/email."},
+    cf_dist:        {targets:["s3_bucket","alb","apigw"],groups:["storage","network","api"],       why:"CloudFront needs an origin — connect it to S3, ALB, or API Gateway."},
+    waf_webacl:     {targets:["alb","cf_dist","apigw"],groups:["network","api"],                   why:"WAF protects ALB, CloudFront, or API Gateway — connect it to one of those."},
+    shield_advanced:{targets:["alb","cf_dist","r53"],groups:["network"],                           why:"Shield Advanced protects your internet-facing resources like ALB and CloudFront."},
+    apigw_rest:     {groups:["serverless","compute","container","k8s","security"],                 why:"REST API Gateway routes to Lambda, EC2, or containers."},
+    apigw_http:     {groups:["serverless","compute","container","security"],                       why:"HTTP API Gateway routes to Lambda or HTTP backends."},
+    r53_zone:       {targets:["alb","cf_dist","apigw"],groups:["network"],                         why:"Route 53 DNS zone should point to ALB, CloudFront, or API Gateway."},
+    acm_cert:       {targets:["alb","cf_dist","apigw"],groups:["network","api"],                   why:"ACM Certificate is attached to ALB, CloudFront, or API Gateway for HTTPS."},
+    vpc_nat:        {groups:["compute","network"],                                                  why:"NAT Gateway lets private EC2 instances reach the internet — connect to private subnets."},
+    secrets_mgr:    {groups:["compute","serverless","k8s","container","database"],                 why:"Secrets Manager stores credentials — connect it to services that need those secrets."},
+    ssm_param:      {groups:["compute","serverless","k8s","container","cicd"],                     why:"SSM Parameter Store holds config values — connect to services that read config."},
+    kms_key:        {groups:["database","storage","serverless","compute"],                         why:"KMS encrypts data at rest — connect it to databases, S3, and Lambda functions."},
+    sqs_std:        {groups:["serverless","compute","container","k8s","monitoring"],               why:"SQS Standard Queue connects producers to consumers — wire in both source and target services."},
+    sqs_fifo:       {groups:["serverless","compute","container","k8s"],                            why:"FIFO queue ensures ordered processing — connect producer and consumer services."},
+    sns_topic:      {groups:["serverless","compute","messaging","monitoring"],                     why:"SNS Topic fans out to SQS queues, Lambda functions, or email endpoints."},
+    eb_bus:         {groups:["serverless","compute","container","k8s"],                            why:"EventBridge routes events from sources to targets — connect producers and consumers."},
+    kinesis_stream: {groups:["compute","serverless","k8s","database","monitoring"],               why:"Kinesis Stream needs producers writing data and consumers reading it."},
+    alb:            {groups:["compute","k8s","container","serverless"],                            why:"ALB distributes incoming traffic — connect it to EC2, ECS, EKS, or Lambda."},
+    nlb:            {groups:["compute","k8s","container"],                                         why:"NLB routes TCP traffic — connect it to EC2 or container workloads."},
+    alb_target_group:{targets:["alb"],groups:["compute","container","k8s"],                       why:"Target Group registers compute/container instances for ALB to route to."},
+    elasticache_redis:{groups:["compute","serverless","k8s","container","database"],               why:"Redis cache sits between your app and database — connect to app servers and database."},
+    s3_bucket:      {groups:["compute","serverless","container","network","cicd"],                 why:"S3 stores files for apps, CI/CD artifacts, and CloudFront static content."},
+    eks_cluster:    {groups:["database","network","storage","monitoring","security","registry"],   why:"EKS cluster needs networking, storage, a registry for images, and monitoring."},
+    ecs_cluster:    {groups:["database","network","storage","monitoring","registry"],              why:"ECS needs networking, storage, a container registry, and monitoring."},
+    lambda_fn:      {groups:["database","storage","api","messaging","monitoring","security"],      why:"Lambda functions typically read/write databases, S3, respond to API calls, or process queue messages."},
+    ec2_instance:   {groups:["database","network","monitoring","security","storage"],             why:"EC2 instances should be behind a load balancer, connected to a database, and monitored."},
+    ec2_asg:        {targets:["alb","nlb"],groups:["database","network","monitoring","security"],  why:"Auto Scaling Group sits behind a load balancer and connects to database and monitoring."},
+    rds_instance:   {groups:["compute","serverless","container","k8s","monitoring","security"],    why:"RDS database needs app servers to query it and monitoring to track performance."},
+    rds_aurora:     {groups:["compute","serverless","container","k8s","monitoring","cache"],       why:"Aurora is accessed by application servers — add a cache layer to reduce DB load."},
+    rds_proxy:      {targets:["rds_instance","rds_aurora"],groups:["compute","serverless"],       why:"RDS Proxy pools connections between Lambda/EC2 and RDS — connect to both sides."},
+    kafka_cluster:  {groups:["compute","serverless","k8s","container","database","monitoring"],   why:"Kafka needs producers (apps) and consumers (apps/databases) on both ends."},
+    rabbitmq_broker:{groups:["compute","serverless","container","k8s","monitoring"],              why:"RabbitMQ broker connects message producers and consumers — wire in both sides."},
+    istio_mesh:     {groups:["k8s","container","monitoring","security"],                           why:"Istio service mesh manages traffic between microservices in Kubernetes."},
+    istio_gateway:  {groups:["network","k8s"],                                                    why:"Istio Gateway is the entry point — connect it to your network and k8s services."},
+    argocd_app:     {groups:["k8s","gitops"],                                                     why:"ArgoCD Application syncs manifests to a Kubernetes cluster."},
+    flux_gitrepo:   {groups:["k8s","gitops","cicd"],                                              why:"Flux GitRepository watches a git repo and syncs changes to Kubernetes."},
+    velero_backup:  {groups:["k8s","storage"],                                                    why:"Velero backs up Kubernetes resources to S3 — connect to your cluster and storage."},
+    k8s_ingress:    {groups:["network","k8s"],                                                    why:"Ingress routes external traffic into the cluster — connect it to network and k8s workloads."},
+    helm_chart:     {groups:["k8s","registry"],                                                   why:"Helm Chart deploys applications into Kubernetes — connect to your cluster."},
+    ansible_site:   {groups:["compute","container","k8s","network"],                              why:"Ansible playbooks configure servers and containers — connect to target infrastructure."},
+    tf_main:        {groups:["compute","database","network","storage","k8s","container"],         why:"Terraform main.tf provisions infrastructure — connect it to all resources it manages."},
+    jenkins_decl:   {groups:["compute","container","k8s","storage","registry"],                   why:"Jenkins pipelines build and deploy to servers, containers, and registries."},
+    traefik_proxy:  {groups:["network","container","k8s","monitoring"],                           why:"Traefik routes traffic to containers and k8s services — connect to both."},
   };
 
   function getSmartConnects(nid, nMeta){
-    var rule=null;
     var mid=(nMeta.id||"").toLowerCase();
-    for(var k in SMART_CONNECT){if(mid.indexOf(k)>=0||k.indexOf(mid)>=0){rule=SMART_CONNECT[k];break;}}
-    if(!rule){
-      // Fallback by group
-      var grp=nMeta.group||"";
-      if(grp==="monitoring")rule={groups:["compute","database","k8s","serverless"],why:"Monitoring services should be connected to all services they observe."};
-      else if(grp==="security")rule={groups:["network","compute"],why:"Security services protect your network and compute layers."};
-      else if(grp==="database")rule={groups:["compute","serverless","k8s"],why:"Databases need an application layer to connect to."};
-      else if(grp==="compute")rule={groups:["database","network","monitoring"],why:"Compute instances typically connect to databases, networks, and monitoring."};
+    var grp=(nMeta.group||nMeta.grp||"").toLowerCase();
+    var rule=null;
+
+    // 1. Exact service override
+    for(var k in SVC_CONNECT_OVERRIDES){
+      if(mid===k||mid.indexOf(k)>=0||(k.length>4&&k.indexOf(mid)>=0)){rule=SVC_CONNECT_OVERRIDES[k];break;}
     }
-    if(!rule)return [];
-    // Find candidate nodes already on canvas to connect to
+    // 2. Group-level fallback
+    if(!rule&&GROUP_CONNECT_MAP[grp])rule=GROUP_CONNECT_MAP[grp];
+    // 3. Generic catch-all
+    if(!rule)rule={groups:["compute","database","network","monitoring","storage","serverless","k8s","container"],why:nMeta.label+" should be connected to the services it depends on or that depend on it."};
+
+    // Find candidates already on canvas that are not yet connected
     var candidates=[];
     nodeList.forEach(function(other){
       if(other.id===nid)return;
-      if(conns.some(function(c){return (c.f===nid&&c.t===other.id)||(c.t===nid&&c.f===other.id);}))return;
+      var alreadyConn=conns.some(function(c){return (c.f===nid&&c.t===other.id)||(c.t===nid&&c.f===other.id);});
+      if(alreadyConn)return;
+      var otherGrp=(other.meta.group||other.meta.grp||"").toLowerCase();
+      var otherId=(other.meta.id||"").toLowerCase();
       var match=false;
-      if(rule.targets){match=rule.targets.some(function(t){return (other.meta.id||"").indexOf(t)>=0;});}
-      if(!match&&rule.groups){match=rule.groups.indexOf(other.meta.group)>=0;}
+      if(rule.targets)match=rule.targets.some(function(t){return otherId.indexOf(t)>=0||t.indexOf(otherId)>=0;});
+      if(!match&&rule.groups)match=rule.groups.indexOf(otherGrp)>=0;
       if(match)candidates.push(other);
     });
     return {candidates:candidates,why:rule.why};
