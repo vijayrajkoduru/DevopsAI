@@ -1633,7 +1633,33 @@ function delAZ(id){var el=document.getElementById(id);if(el)el.remove();delete a
 var nodes={},conns=[],selId=null,connFrom=null,nc=0;
 function createNode(meta,x,y){
   var id="n"+(++nc);
-  nodes[id]={id:id,meta:meta,x:x,y:y,config:{name:meta.label},w:160,h:72};
+  // Auto-number name if same service type already exists
+  var sameType=Object.values(nodes).filter(function(n){return n.meta.id===meta.id;});
+  var autoName=meta.label;
+  if(sameType.length>0){
+    // Find the highest existing number suffix
+    var max=1;
+    sameType.forEach(function(n){
+      var nm=n.config&&n.config.name?n.config.name:n.meta.label;
+      var m=nm.match(/(\d+)$/);
+      if(m)max=Math.max(max,parseInt(m[1]));
+      else max=Math.max(max,1);
+    });
+    // Also rename the first one to "...1" if it has no number yet
+    if(sameType.length===1){
+      var first=sameType[0];
+      var firstName=first.config&&first.config.name?first.config.name:first.meta.label;
+      if(!/\d+$/.test(firstName)){
+        first.config.name=firstName+" 1";
+        var fTitle=document.querySelector("#"+first.id+" .node-title");
+        if(fTitle)fTitle.textContent=firstName+" 1";
+        var fSt=document.getElementById(first.id+"-st");
+        if(fSt&&fSt.textContent==="Click to configure"){}
+      }
+    }
+    autoName=meta.label+" "+(max+1);
+  }
+  nodes[id]={id:id,meta:meta,x:x,y:y,config:{name:autoName},w:160,h:72};
   var el=document.createElement("div");
   el.className="node";el.id=id;
   el.style.cssText="left:"+x+"px;top:"+y+"px;width:160px";
@@ -1642,7 +1668,7 @@ function createNode(meta,x,y){
   var head=document.createElement("div");head.className="node-head";
   head.appendChild(icoEl);
   var info=document.createElement("div");
-  info.innerHTML='<div class="node-title">'+meta.label+'</div><div class="node-sub">'+(meta.subName||"")+'</div>';
+  info.innerHTML='<div class="node-title">'+autoName+'</div><div class="node-sub">'+(meta.subName||"")+'</div>';
   head.appendChild(info);
   var foot=document.createElement("div");foot.className="node-foot";
   foot.innerHTML='<div class="ndot" id="'+id+'-dot"></div><span class="node-st" id="'+id+'-st">Click to configure</span><span class="cost-badge" id="'+id+'-cost">'+getNodeCost(meta.id,{})+'</span><div class="conn-btn" id="'+id+'-cbtn">+</div>';
@@ -2711,33 +2737,40 @@ function cleanAllDupes(){
     if(!svcMap[key])svcMap[key]=[];
     svcMap[key].push(nid);
   });
-  var merged=0;
+  var renamed=0,removed=0;
   Object.keys(svcMap).forEach(function(key){
     var ids=svcMap[key];
     if(ids.length<2)return;
-    // Sort by connection count descending — keep most connected
+    // Sort by connection count descending
     ids.sort(function(a,b){
       var ac=conns.filter(function(c){return c.f===a||c.t===a;}).length;
       var bc=conns.filter(function(c){return c.f===b||c.t===b;}).length;
       return bc-ac;
     });
-    var keepId=ids[0];
-    ids.slice(1).forEach(function(removeId){
-      if(!nodes[removeId])return;
-      conns.forEach(function(c){
-        if(c.f===removeId&&c.t!==keepId)c.f=keepId;
-        if(c.t===removeId&&c.f!==keepId)c.t=keepId;
-      });
-      conns=conns.filter(function(c){return c.f!==c.t&&c.f!==removeId&&c.t!==removeId;});
-      var el=document.getElementById(removeId);if(el)el.remove();
-      delete nodes[removeId];
-      merged++;
+    ids.forEach(function(nid,i){
+      if(!nodes[nid])return;
+      var connCount=conns.filter(function(c){return c.f===nid||c.t===nid;}).length;
+      var baseName=nodes[nid].meta.label.replace(/\s*\d+$/,"");
+      if(connCount===0&&i>0){
+        // Completely unconnected duplicate — remove it
+        var el=document.getElementById(nid);if(el)el.remove();
+        delete nodes[nid];removed++;
+      } else {
+        // Has connections or is primary — rename to numbered version
+        var newName=baseName+" "+(i+1);
+        nodes[nid].config.name=newName;
+        var titleEl=document.querySelector("#"+nid+" .node-title");
+        if(titleEl)titleEl.textContent=newName;
+        renamed++;
+      }
     });
   });
   if(selId&&!nodes[selId]){selId=null;document.getElementById("props").style.display="none";}
   drawLines();updateReadiness();
-  if(merged>0)showNotif("ok","Cleaned!",merged+" duplicate node(s) merged and removed.","Connections transferred to primary nodes.",4000);
-  else showNotif("info","No Duplicates","No duplicate services found on canvas.","",3000);
+  if(renamed>0||removed>0){
+    var msg=(renamed>0?renamed+" nodes renamed. ":"")+(removed>0?removed+" empty duplicates removed.":"");
+    showNotif("ok","Cleaned!",msg,"Each duplicate now has a unique name.",4000);
+  } else showNotif("info","No Duplicates","No duplicate services found on canvas.","",3000);
   validateArchitecture();
 }
 async function genAll(){
