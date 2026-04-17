@@ -2094,11 +2094,61 @@ function validateArchitecture(){
     return other&&other.meta.group===group;
   });}
 
+  // ── SMART CONNECTION RULES: what each service type should connect to ──
+  var SMART_CONNECT={
+    prometheus:   {groups:["compute","k8s","serverless","database","monitoring"],why:"Prometheus scrapes metrics from all running services — connect it to every service you want to monitor."},
+    cloudwatch:   {groups:["compute","database","serverless","k8s","network"],why:"CloudWatch collects logs and metrics from AWS services."},
+    grafana:      {groups:["monitoring"],targets:["prometheus","cloudwatch"],why:"Grafana visualises metrics — connect it to Prometheus or CloudWatch as data sources."},
+    alb:          {groups:["compute","k8s","serverless"],why:"ALB distributes traffic to backend compute or containers."},
+    nlb:          {groups:["compute","k8s"],why:"NLB forwards TCP traffic to compute instances."},
+    rds_mysql:    {groups:["compute","serverless","k8s"],why:"RDS is accessed by application servers — connect it to EC2, Lambda, or EKS."},
+    rds_postgres: {groups:["compute","serverless","k8s"],why:"RDS PostgreSQL needs an application server to query it."},
+    rds_aurora:   {groups:["compute","serverless","k8s"],why:"Aurora needs an application layer to read/write data."},
+    dynamodb:     {groups:["serverless","compute","k8s"],why:"DynamoDB is typically accessed by Lambda or application servers."},
+    elasticache_redis:{groups:["compute","serverless","k8s"],why:"Redis sits in front of your database — connect it to your application layer."},
+    s3_bucket:    {groups:["compute","serverless","cdn"],why:"S3 is used by apps for storage and by CloudFront as an origin."},
+    cloudfront:   {groups:["storage","compute","serverless"],targets:["s3_bucket","alb"],why:"CloudFront needs an origin — connect it to S3 or ALB."},
+    waf:          {groups:["network"],targets:["alb","cloudfront"],why:"WAF protects your ALB or CloudFront distribution — connect it to one of those."},
+    api_gw:       {groups:["serverless","compute"],why:"API Gateway routes requests to Lambda or EC2 backends."},
+    lambda:       {groups:["database","storage","compute"],why:"Lambda functions usually read/write to databases, S3, or trigger from other services."},
+    vpc_nat:      {groups:["compute","network"],why:"NAT Gateway lets private instances reach the internet — connect it to EC2 in private subnets."},
+    sqs:          {groups:["serverless","compute"],why:"SQS queues messages between producers and consumers — connect source and destination services."},
+    sns:          {groups:["serverless","compute","storage"],why:"SNS fans out notifications to subscribers like Lambda, SQS, or email."},
+    elasticsearch:{groups:["compute","serverless"],why:"Elasticsearch indexes data from your application — connect it to your backend services."},
+    kafka_msk:    {groups:["compute","serverless","k8s"],why:"Kafka streams data between producers and consumers in your architecture."},
+  };
+
+  function getSmartConnects(nid, nMeta){
+    var rule=null;
+    var mid=(nMeta.id||"").toLowerCase();
+    for(var k in SMART_CONNECT){if(mid.indexOf(k)>=0||k.indexOf(mid)>=0){rule=SMART_CONNECT[k];break;}}
+    if(!rule){
+      // Fallback by group
+      var grp=nMeta.group||"";
+      if(grp==="monitoring")rule={groups:["compute","database","k8s","serverless"],why:"Monitoring services should be connected to all services they observe."};
+      else if(grp==="security")rule={groups:["network","compute"],why:"Security services protect your network and compute layers."};
+      else if(grp==="database")rule={groups:["compute","serverless","k8s"],why:"Databases need an application layer to connect to."};
+      else if(grp==="compute")rule={groups:["database","network","monitoring"],why:"Compute instances typically connect to databases, networks, and monitoring."};
+    }
+    if(!rule)return [];
+    // Find candidate nodes already on canvas to connect to
+    var candidates=[];
+    nodeList.forEach(function(other){
+      if(other.id===nid)return;
+      if(conns.some(function(c){return (c.f===nid&&c.t===other.id)||(c.t===nid&&c.f===other.id);}))return;
+      var match=false;
+      if(rule.targets){match=rule.targets.some(function(t){return (other.meta.id||"").indexOf(t)>=0;});}
+      if(!match&&rule.groups){match=rule.groups.indexOf(other.meta.group)>=0;}
+      if(match)candidates.push(other);
+    });
+    return {candidates:candidates,why:rule.why};
+  }
+
   // ── RULE CHECKS ──
   // EC2 without VPC
   (groups_by_type.compute||[]).forEach(function(n){
     if(!connectedTo(n.id,"network")&&!hasVPC)
-      issues.push({icon:"🔴",title:n.meta.label+" has no VPC or network",fix:"Connect it to a VPC or security group. EC2 without VPC is not deployable."});
+      issues.push({icon:"🔴",title:n.meta.label+" has no VPC or network",fix:"Connect it to a VPC or security group. EC2 without VPC is not deployable.",nodeId:n.id});
   });
   // Dockerfile connected to EC2 — warn about direction
   nodeList.forEach(function(n){
@@ -2106,27 +2156,39 @@ function validateArchitecture(){
       conns.forEach(function(c){
         var other=c.f===n.id?nodes[c.t]:c.t===n.id?nodes[c.f]:null;
         if(other&&other.meta.group==="compute")
-          warnings.push({icon:"🟡",title:"EC2 → Dockerfile connection",fix:"Dockerfile is a build artifact, not a running service. Consider adding a CI/CD pipeline (GitHub Actions, CodePipeline) between EC2 and Dockerfile to build & push the image first."});
+          warnings.push({icon:"🟡",title:"EC2 → Dockerfile connection",fix:"Dockerfile is a build artifact, not a running service. Consider adding a CI/CD pipeline (GitHub Actions, CodePipeline) between EC2 and Dockerfile to build & push the image first.",add:[{id:"github_actions",n:"GitHub Actions"},{id:"codepipeline",n:"CodePipeline"}]});
       });
     }
   });
   // DB without compute
   (groups_by_type.database||[]).forEach(function(n){
-    if(!connectedTo(n.id,"compute")&&!connectedTo(n.id,"serverless")&&!connectedTo(n.id,"k8s"))
-      warnings.push({icon:"🟡",title:n.meta.label+" is not connected to any compute",fix:"Connect it to EC2, Lambda, or EKS that will access this database."});
+    if(!connectedTo(n.id,"compute")&&!connectedTo(n.id,"serverless")&&!connectedTo(n.id,"k8s")){
+      var sc=getSmartConnects(n.id,n.meta);
+      warnings.push({icon:"🟡",title:n.meta.label+" is not connected to any compute",
+        fix:"Connect it to EC2, Lambda, or EKS that will access this database. "+(sc.why||""),
+        nodeId:n.id, connectTo:sc.candidates||[]});
+    }
   });
   // Load balancer without compute behind it
   nodeList.forEach(function(n){
     if((n.meta.id||"").indexOf("alb")>=0||(n.meta.id||"").indexOf("nlb")>=0){
-      if(!connectedTo(n.id,"compute")&&!connectedTo(n.id,"k8s")&&!connectedTo(n.id,"serverless"))
-        issues.push({icon:"🔴",title:n.meta.label+" has nothing behind it",fix:"Connect ALB/NLB to EC2 ASG, ECS, or EKS target group."});
+      if(!connectedTo(n.id,"compute")&&!connectedTo(n.id,"k8s")&&!connectedTo(n.id,"serverless")){
+        var sc=getSmartConnects(n.id,n.meta);
+        issues.push({icon:"🔴",title:n.meta.label+" has nothing behind it",
+          fix:"Connect ALB/NLB to EC2 ASG, ECS, or EKS target group.",
+          nodeId:n.id, connectTo:sc.candidates||[]});
+      }
     }
   });
   // NAT Gateway without private subnet
   nodeList.forEach(function(n){
     if((n.meta.id||"").indexOf("nat")>=0){
-      if(!hasConn(n.id))
-        warnings.push({icon:"🟡",title:"NAT Gateway is isolated",fix:"Connect NAT Gateway to your private subnets so instances can reach the internet."});
+      if(!hasConn(n.id)){
+        var sc=getSmartConnects(n.id,n.meta);
+        warnings.push({icon:"🟡",title:"NAT Gateway is isolated",
+          fix:"Connect NAT Gateway to your private subnets so instances can reach the internet.",
+          nodeId:n.id, connectTo:sc.candidates||[]});
+      }
     }
   });
   // Two VPCs peered — check for VPC peering node
@@ -2135,10 +2197,16 @@ function validateArchitecture(){
     if(!hasPeeringRules)
       warnings.push({icon:"🟡",title:"VPC Peering has no access rules defined",fix:"Click ⇌ on the peering line and configure which services can talk to each other with port restrictions."});
   }
-  // Isolated nodes
+  // Isolated nodes — smart connect suggestions
   nodeList.forEach(function(n){
-    if(!hasConn(n.id))
-      warnings.push({icon:"🟡",title:n.meta.label+" is not connected to anything",fix:"Connect it to related services or remove it if not needed."});
+    if(!hasConn(n.id)){
+      var sc=getSmartConnects(n.id,n.meta);
+      var candidates=sc.candidates||[];
+      warnings.push({icon:"🟡",title:n.meta.label+" is not connected to anything",
+        fix:sc.why||(n.meta.label+" is isolated. Connect it to related services or remove it if not needed."),
+        nodeId:n.id, connectTo:candidates,
+        connectAll: candidates.length>1 ? candidates : null});
+    }
   });
   // No monitoring
   if(!groups_by_type.monitoring&&nodeList.length>3)
@@ -2189,22 +2257,52 @@ function validateArchitecture(){
   function renderList(arr){
     if(!arr.length)return '<div style="color:#444;font-size:12px;padding:8px 0">None found ✓</div>';
     return arr.map(function(item){
-      var addBtns='';
+      var actionBtns='';
+      var btnStyle='border-radius:6px;font-size:10px;font-weight:700;padding:3px 10px;cursor:pointer;transition:background 0.15s;border:1px solid ';
+
+      // "+ Add" buttons for suggestions
       if(item.add && item.add.length){
-        addBtns='<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">'
+        actionBtns+='<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">'
+          +'<span style="font-size:9px;color:#555;width:100%;margin-bottom:2px;letter-spacing:.5px">ADD TO CANVAS</span>'
           +item.add.map(function(a){
             return '<button onclick="addServiceFromValidator(\''+a.id+'\',\''+a.n+'\')" '
-              +'style="background:#1a1a2e;border:1px solid #7c3aed;border-radius:6px;color:#a78bfa;'
-              +'font-size:10px;font-weight:700;padding:3px 9px;cursor:pointer;transition:background 0.15s" '
+              +'style="background:#1a1a2e;'+btnStyle+'#7c3aed;color:#a78bfa" '
               +'onmouseover="this.style.background=\'#2d1b69\'" onmouseout="this.style.background=\'#1a1a2e\'">'
               +'+ '+a.n+'</button>';
-          }).join('')
+          }).join('')+'</div>';
+      }
+
+      // "Connect to X" buttons for isolated nodes
+      if(item.connectTo && item.connectTo.length){
+        actionBtns+='<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">'
+          +'<span style="font-size:9px;color:#555;width:100%;margin-bottom:2px;letter-spacing:.5px">AUTO-CONNECT TO</span>';
+        item.connectTo.forEach(function(other){
+          actionBtns+='<button onclick="smartConnectNodes(\''+item.nodeId+'\',\''+other.id+'\')" '
+            +'style="background:#0d1a0d;'+btnStyle+'#16a34a;color:#4ade80" '
+            +'onmouseover="this.style.background=\'#14290f\'" onmouseout="this.style.background=\'#0d1a0d\'">↔ '+other.meta.label+'</button>';
+        });
+        if(item.connectAll && item.connectAll.length>1){
+          var allIds=item.connectAll.map(function(o){return o.id;}).join(',');
+          actionBtns+='<button onclick="smartConnectAll(\''+item.nodeId+'\',\''+allIds+'\')" '
+            +'style="background:#1a1200;'+btnStyle+'#ca8a04;color:#fbbf24" '
+            +'onmouseover="this.style.background=\'#2a1e00\'" onmouseout="this.style.background=\'#1a1200\'">⚡ Connect All ('+item.connectAll.length+')</button>';
+        }
+        actionBtns+='</div>';
+      }
+
+      // Remove button for node-specific items
+      if(item.nodeId){
+        actionBtns+='<div style="margin-top:6px">'
+          +'<button onclick="removeNodeFromValidator(\''+item.nodeId+'\')" '
+          +'style="background:transparent;'+btnStyle+'#3f1a1a;color:#f87171;font-size:9px;padding:2px 8px;cursor:pointer" '
+          +'onmouseover="this.style.background=\'#2a0f0f\'" onmouseout="this.style.background=\'transparent\'">🗑 Remove service</button>'
           +'</div>';
       }
+
       return '<div style="background:#0a0a18;border:1px solid #1e1e30;border-radius:8px;padding:10px 12px;margin-bottom:8px">'
         +'<div style="font-size:12px;font-weight:700;color:#ddd;margin-bottom:4px">'+item.icon+' '+item.title+'</div>'
         +'<div style="font-size:11px;color:#888;line-height:1.5">💬 '+item.fix+'</div>'
-        +addBtns
+        +actionBtns
         +'</div>';
     }).join("");
   }
@@ -2253,6 +2351,35 @@ function addServiceFromValidator(id, name){
   createNode(meta,cx,cy);
   document.getElementById("hint").style.display="none";
   showNotif("ok","Added!",name+" added to canvas.","Select it to configure properties.",3000);
+  validateArchitecture();
+}
+function smartConnectNodes(fromId, toId){
+  if(!nodes[fromId]||!nodes[toId])return;
+  var already=conns.some(function(c){return (c.f===fromId&&c.t===toId)||(c.t===fromId&&c.f===toId);});
+  if(!already){conns.push({f:fromId,t:toId});drawLines();}
+  showNotif("ok","Connected!",nodes[fromId].meta.label+" ↔ "+nodes[toId].meta.label,"Connection created successfully.",2500);
+  validateArchitecture();
+}
+function smartConnectAll(fromId, idsStr){
+  var ids=idsStr.split(',');var count=0;
+  ids.forEach(function(toId){
+    if(!nodes[fromId]||!nodes[toId])return;
+    var already=conns.some(function(c){return (c.f===fromId&&c.t===toId)||(c.t===fromId&&c.f===toId);});
+    if(!already){conns.push({f:fromId,t:toId});count++;}
+  });
+  drawLines();
+  showNotif("ok","Connected All!",count+" connections created for "+nodes[fromId].meta.label,"All recommended connections are now wired.",3000);
+  validateArchitecture();
+}
+function removeNodeFromValidator(nid){
+  if(!nodes[nid])return;
+  var label=nodes[nid].meta.label;
+  conns=conns.filter(function(c){return c.f!==nid&&c.t!==nid;});
+  var el=document.getElementById(nid);if(el)el.remove();
+  delete nodes[nid];
+  if(selId===nid){selId=null;document.getElementById("props").style.display="none";}
+  drawLines();
+  showNotif("ok","Removed",label+" removed from canvas.","",2000);
   validateArchitecture();
 }
 async function genAll(){
