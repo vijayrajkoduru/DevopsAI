@@ -346,7 +346,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
       <button class="tbb" onclick="zoomIn()" title="Zoom in">+</button>
       <button class="tbb" onclick="zoomReset()" title="Reset zoom">↺</button>
       <div style="flex:1"></div>
-      <button id="architect-btn" onclick="openArchitect()" title="DevOps Architect AI" style="width:34px;height:34px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:8px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all 0.2s;flex-shrink:0" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">🏗</button>
+      <button class="tbb" onclick="validateArchitecture()" style="background:#0a1a0a;border-color:#166534;color:#4ade80">🔍 Validate</button>
       <button class="tbb" id="cost-toggle-btn" onclick="toggleCostBadges()" style="background:#13131f;border-color:#1e1e30;color:#666">💰 Show Costs</button>
       <button class="tbb purple" onclick="genAll()">⚡ Generate All</button>
       <button class="tbb green" onclick="toggleDeploy()">🚀 Deploy</button>
@@ -2075,6 +2075,153 @@ function clearCanvas(){
   drawLines();selId=null;
   document.getElementById("hint").style.display="block";
   document.getElementById("rpbody").innerHTML='<div class="empty-st"><div style="font-size:24px;opacity:0.1;margin-bottom:8px">🗺</div><p>Drag a service to the canvas<br>then click it to configure</p></div>';
+}
+// ── ARCHITECTURE VALIDATOR ────────────────────────────────────────────────────
+function validateArchitecture(){
+  var issues=[], warnings=[], suggestions=[], budget=[];
+  var nodeList=Object.values(nodes);
+  var hasVPC=Object.keys(vpcs).length>0;
+  var groups_by_type={};
+  nodeList.forEach(function(n){
+    var g=n.meta.group||"other";
+    if(!groups_by_type[g])groups_by_type[g]=[];
+    groups_by_type[g].push(n);
+  });
+  function hasConn(id){return conns.some(function(c){return c.f===id||c.t===id;});}
+  function connectedTo(id,group){return conns.some(function(c){
+    var other=c.f===id?nodes[c.t]:c.t===id?nodes[c.f]:null;
+    return other&&other.meta.group===group;
+  });}
+
+  // ── RULE CHECKS ──
+  // EC2 without VPC
+  (groups_by_type.compute||[]).forEach(function(n){
+    if(!connectedTo(n.id,"network")&&!hasVPC)
+      issues.push({icon:"🔴",title:n.meta.label+" has no VPC or network",fix:"Connect it to a VPC or security group. EC2 without VPC is not deployable."});
+  });
+  // Dockerfile connected to EC2 — warn about direction
+  nodeList.forEach(function(n){
+    if(n.meta.group==="container"){
+      conns.forEach(function(c){
+        var other=c.f===n.id?nodes[c.t]:c.t===n.id?nodes[c.f]:null;
+        if(other&&other.meta.group==="compute")
+          warnings.push({icon:"🟡",title:"EC2 → Dockerfile connection",fix:"Dockerfile is a build artifact, not a running service. Consider adding a CI/CD pipeline (GitHub Actions, CodePipeline) between EC2 and Dockerfile to build & push the image first."});
+      });
+    }
+  });
+  // DB without compute
+  (groups_by_type.database||[]).forEach(function(n){
+    if(!connectedTo(n.id,"compute")&&!connectedTo(n.id,"serverless")&&!connectedTo(n.id,"k8s"))
+      warnings.push({icon:"🟡",title:n.meta.label+" is not connected to any compute",fix:"Connect it to EC2, Lambda, or EKS that will access this database."});
+  });
+  // Load balancer without compute behind it
+  nodeList.forEach(function(n){
+    if((n.meta.id||"").indexOf("alb")>=0||(n.meta.id||"").indexOf("nlb")>=0){
+      if(!connectedTo(n.id,"compute")&&!connectedTo(n.id,"k8s")&&!connectedTo(n.id,"serverless"))
+        issues.push({icon:"🔴",title:n.meta.label+" has nothing behind it",fix:"Connect ALB/NLB to EC2 ASG, ECS, or EKS target group."});
+    }
+  });
+  // NAT Gateway without private subnet
+  nodeList.forEach(function(n){
+    if((n.meta.id||"").indexOf("nat")>=0){
+      if(!hasConn(n.id))
+        warnings.push({icon:"🟡",title:"NAT Gateway is isolated",fix:"Connect NAT Gateway to your private subnets so instances can reach the internet."});
+    }
+  });
+  // Two VPCs peered — check for VPC peering node
+  if(vpcConns.length>0){
+    var hasPeeringRules=vpcConns.some(function(c){return c.rules&&c.rules.length>0;});
+    if(!hasPeeringRules)
+      warnings.push({icon:"🟡",title:"VPC Peering has no access rules defined",fix:"Click ⇌ on the peering line and configure which services can talk to each other with port restrictions."});
+  }
+  // Isolated nodes
+  nodeList.forEach(function(n){
+    if(!hasConn(n.id))
+      warnings.push({icon:"🟡",title:n.meta.label+" is not connected to anything",fix:"Connect it to related services or remove it if not needed."});
+  });
+  // No monitoring
+  if(!groups_by_type.monitoring&&nodeList.length>3)
+    suggestions.push({icon:"💡",title:"No monitoring configured",fix:"Add CloudWatch or Prometheus to monitor your infrastructure. Critical for production."});
+  // No security layer
+  if(!groups_by_type.security&&nodeList.length>2)
+    suggestions.push({icon:"💡",title:"No security services",fix:"Add WAF, Security Groups, or IAM Roles to protect your architecture."});
+  // No CDN for web workloads
+  if(groups_by_type.compute&&!groups_by_type.cdn)
+    suggestions.push({icon:"💡",title:"Consider adding CloudFront CDN",fix:"A CDN reduces latency and protects against DDoS for web applications."});
+  // No backup/storage
+  if((groups_by_type.database||groups_by_type.compute)&&!groups_by_type.storage)
+    suggestions.push({icon:"💡",title:"No S3 storage or backup configured",fix:"Add an S3 bucket for backups, static assets, or logs."});
+
+  // ── BUDGET ESTIMATE ──
+  var PRICES={
+    ec2_instance:30,ec2_asg:60,rds_mysql:50,rds_postgres:55,rds_aurora:80,
+    eks_cluster:75,ecs_fargate:40,lambda:5,alb:20,nlb:18,elasticache_redis:30,
+    s3_bucket:5,cloudfront:10,api_gw:10,sqs:3,sns:2,waf:20,
+    vpc_nat:35,route53:5,ecr_repo:5,elasticsearch:80,kafka_msk:120,
+  };
+  var totalMin=0,totalMax=0;
+  nodeList.forEach(function(n){
+    var price=0;
+    var id=(n.meta.id||"").toLowerCase();
+    for(var k in PRICES){if(id.indexOf(k)>=0||k.indexOf(id.split("_")[0])>=0){price=PRICES[k];break;}}
+    if(price>0){
+      budget.push({label:n.meta.label,min:Math.round(price*0.8),max:Math.round(price*1.3)});
+      totalMin+=Math.round(price*0.8);totalMax+=Math.round(price*1.3);
+    }
+  });
+
+  // ── RENDER ──
+  var old=document.getElementById("validate-overlay");if(old)old.remove();
+  var score=100-issues.length*20-warnings.length*5;
+  if(score<0)score=0;
+  var scoreColor=score>=80?"#4ade80":score>=50?"#fbbf24":"#f87171";
+
+  function renderList(arr){
+    if(!arr.length)return '<div style="color:#444;font-size:12px;padding:8px 0">None found ✓</div>';
+    return arr.map(function(item){
+      return '<div style="background:#0a0a18;border:1px solid #1e1e30;border-radius:8px;padding:10px 12px;margin-bottom:8px">'
+        +'<div style="font-size:12px;font-weight:700;color:#ddd;margin-bottom:4px">'+item.icon+' '+item.title+'</div>'
+        +'<div style="font-size:11px;color:#888;line-height:1.5">💬 '+item.fix+'</div>'
+        +'</div>';
+    }).join("");
+  }
+
+  var budgetRows=budget.map(function(b){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #0e0e1a">'
+      +'<span style="font-size:11px;color:#888">'+b.label+'</span>'
+      +'<span style="font-size:11px;color:#4ade80;font-family:monospace">$'+b.min+'–$'+b.max+'/mo</span>'
+      +'</div>';
+  }).join("");
+
+  var overlay=document.createElement("div");
+  overlay.id="validate-overlay";
+  overlay.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box";
+  overlay.innerHTML='<div style="background:#0d0d1a;border:1px solid #2a2a40;border-radius:16px;padding:28px;width:620px;max-width:98vw;max-height:90vh;overflow-y:auto">'
+    +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:22px">'
+    +'<span style="font-size:22px">🔍</span>'
+    +'<div><div style="font-size:16px;font-weight:800;color:#fff">Architecture Validator</div>'
+    +'<div style="font-size:10px;color:#555;margin-top:2px">'+nodeList.length+' services · '+conns.length+' connections · '+Object.keys(vpcs).length+' VPCs</div></div>'
+    +'<div style="margin-left:auto;text-align:center">'
+    +'<div style="font-size:28px;font-weight:900;color:'+scoreColor+'">'+score+'</div>'
+    +'<div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1px">Score</div>'
+    +'</div>'
+    +'<span onclick="document.getElementById(\'validate-overlay\').remove()" style="margin-left:12px;cursor:pointer;color:#555;font-size:20px;line-height:1">✕</span></div>'
+
+    +'<div style="font-size:10px;color:#f87171;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:8px">🔴 Critical Issues ('+issues.length+')</div>'
+    +renderList(issues)
+    +'<div style="font-size:10px;color:#fbbf24;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin:14px 0 8px">🟡 Warnings ('+warnings.length+')</div>'
+    +renderList(warnings)
+    +'<div style="font-size:10px;color:#60a5fa;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin:14px 0 8px">💡 Suggestions ('+suggestions.length+')</div>'
+    +renderList(suggestions)
+
+    +'<div style="font-size:10px;color:#4ade80;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin:18px 0 8px">💰 Estimated Monthly Budget</div>'
+    +'<div style="background:#060610;border:1px solid #1e1e30;border-radius:8px;padding:12px 14px">'
+    +(budgetRows||'<div style="color:#444;font-size:12px">No priced services detected</div>')
+    +(budget.length?'<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0 0;margin-top:6px;border-top:1px solid #2a2a40"><span style="font-size:12px;font-weight:700;color:#fff">Total Estimate</span><span style="font-size:13px;font-weight:800;color:#4ade80;font-family:monospace">$'+totalMin+'–$'+totalMax+'/mo</span></div>':"")
+    +'</div>'
+    +'<button onclick="document.getElementById(\'validate-overlay\').remove()" style="width:100%;margin-top:18px;padding:11px;background:#13131f;border:1px solid #2a2a40;border-radius:8px;color:#888;font-size:13px;cursor:pointer">Close</button>'
+    +'</div>';
+  document.body.appendChild(overlay);
 }
 async function genAll(){
   var ids=Object.keys(nodes);
