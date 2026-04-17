@@ -8,10 +8,8 @@
 body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;height:100vh;overflow:hidden;display:flex;flex-direction:column;user-select:none}
 .topbar{background:#09090f;border-bottom:1px solid #16162a;padding:0 24px;height:54px;display:flex;align-items:center;gap:14px;flex-shrink:0;box-shadow:0 1px 0 #16162a,0 4px 24px rgba(0,0,0,0.5)}
 .logo{display:flex;align-items:center;gap:11px;margin-right:20px;cursor:default;user-select:none}
-.logo-mark{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:#fff;flex-shrink:0;background:linear-gradient(135deg,#6c47ff,#a78bfa);background-size:200% 200%;animation:logo-aurora 5s ease infinite;position:relative;overflow:hidden}
-.logo-mark::after{content:'';position:absolute;inset:0;background:linear-gradient(120deg,transparent 30%,rgba(255,255,255,0.18) 50%,transparent 70%);animation:logo-shine 4s ease-in-out infinite}
-@keyframes logo-aurora{0%,100%{background-position:0% 50%;box-shadow:0 0 12px rgba(108,71,255,0.5)}50%{background-position:100% 50%;box-shadow:0 0 22px rgba(167,139,250,0.7),0 0 40px rgba(108,71,255,0.25)}}
-@keyframes logo-shine{0%,100%{transform:translateX(-100%) skewX(-20deg)}60%{transform:translateX(200%) skewX(-20deg)}}
+.logo-mark{width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:26px;color:#f97316;flex-shrink:0;animation:hex-breathe 3s ease-in-out infinite;line-height:1}
+@keyframes hex-breathe{0%,100%{text-shadow:0 0 8px rgba(249,115,22,0.5),0 0 20px rgba(249,115,22,0.2);transform:scale(1)}50%{text-shadow:0 0 16px rgba(249,115,22,0.9),0 0 40px rgba(249,115,22,0.4),0 0 60px rgba(249,115,22,0.15);transform:scale(1.1)}}
 .logo-txt-wrap{display:flex;flex-direction:column;line-height:1.15}
 .logo-txt{font-size:15px;font-weight:800;letter-spacing:-0.4px;color:#fff}
 .logo-txt span{color:#f97316}
@@ -271,7 +269,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
 <div class="ctx-menu" id="ctx-menu"></div>
 <div class="topbar">
   <div class="logo">
-    <div class="logo-mark">D</div>
+    <div class="logo-mark">⬡</div>
     <div class="logo-txt-wrap">
       <span class="logo-txt">Devops<span>AI</span></span>
       <span class="logo-sub">Cloud Infrastructure</span>
