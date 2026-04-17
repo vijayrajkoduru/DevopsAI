@@ -2452,27 +2452,7 @@ function validateArchitecture(){
         connectAll: candidates.length>1 ? candidates : null});
     }
   });
-  // No monitoring
-  if(!groups_by_type.monitoring&&nodeList.length>3)
-    suggestions.push({icon:"💡",title:"No monitoring configured",fix:"Add CloudWatch or Prometheus to monitor your infrastructure. Critical for production.",add:[{id:"cloudwatch",n:"CloudWatch"},{id:"prometheus",n:"Prometheus"}]});
-  // No security layer
-  if(!groups_by_type.security&&nodeList.length>2)
-    suggestions.push({icon:"💡",title:"No security services",fix:"Add WAF, Security Groups, or IAM Roles to protect your architecture.",add:[{id:"waf",n:"WAF"},{id:"vpc_sg",n:"Security Group"},{id:"iam_role",n:"IAM Role"}]});
-  // No CDN for web workloads
-  if(groups_by_type.compute&&!groups_by_type.cdn)
-    suggestions.push({icon:"💡",title:"Consider adding CloudFront CDN",fix:"A CDN reduces latency and protects against DDoS for web applications.",add:[{id:"cloudfront",n:"CloudFront"}]});
-  // No backup/storage
-  if((groups_by_type.database||groups_by_type.compute)&&!groups_by_type.storage)
-    suggestions.push({icon:"💡",title:"No S3 storage or backup configured",fix:"Add an S3 bucket for backups, static assets, or logs.",add:[{id:"s3_bucket",n:"S3 Bucket"}]});
-  // No CI/CD
-  if(!groups_by_type.cicd&&nodeList.length>2)
-    suggestions.push({icon:"💡",title:"No CI/CD pipeline configured",fix:"Add a GitHub Actions or CodePipeline to automate deployments.",add:[{id:"github_actions",n:"GitHub Actions"},{id:"codepipeline",n:"CodePipeline"}]});
-  // No load balancer
-  if(groups_by_type.compute&&!nodeList.some(function(n){return (n.meta.id||"").indexOf("alb")>=0||(n.meta.id||"").indexOf("nlb")>=0;}))
-    suggestions.push({icon:"💡",title:"No load balancer configured",fix:"Add an ALB to distribute traffic across your instances.",add:[{id:"alb",n:"ALB"},{id:"nlb",n:"NLB"}]});
-  // No cache
-  if(groups_by_type.database&&!groups_by_type.cache)
-    suggestions.push({icon:"💡",title:"No caching layer",fix:"Add Redis/ElastiCache to reduce database load and improve response time.",add:[{id:"elasticache_redis",n:"Redis"},{id:"elasticache_memcached",n:"Memcached"}]});
+  // Suggestions removed — use 🤖 Arch Agent for intelligent recommendations (AI-powered)
 
   // ── DUPLICATE NODE DETECTION ──
   var svcGroups={};
@@ -2631,6 +2611,7 @@ function validateArchitecture(){
     +'<div style="font-size:10px;color:#fbbf24;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin:14px 0 8px">🟡 Warnings ('+warnings.length+')</div>'
     +renderList(warnings)
     +'<div style="font-size:10px;color:#60a5fa;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin:14px 0 8px">💡 Suggestions ('+suggestions.length+')</div>'
+    +(suggestions.length===0?'<div style="background:#0a0d1a;border:1px solid #1e2a3a;border-radius:8px;padding:10px 14px;font-size:11px;color:#555">Use the <span style="color:#a78bfa;font-weight:700">🤖 Arch Agent</span> for intelligent recommendations — it uses Claude AI to detect wrong connections, missing services, and production best practices.</div>':'')
     +renderList(suggestions)
 
     +'<div style="font-size:10px;color:#4ade80;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin:18px 0 8px">💰 Estimated Monthly Budget</div>'
@@ -5890,8 +5871,7 @@ function toggleArchAgent(){
   document.getElementById("arch-agent-panel").classList.toggle("open",_aapOpen);
 }
 
-var _aapRawJson="";
-function runArchAgent(){
+async function runArchAgent(){
   var nids=Object.keys(nodes);
   if(!nids.length){showNotif("warn","Empty Canvas","Add some services first.","",3000);return;}
 
@@ -5900,44 +5880,31 @@ function runArchAgent(){
   var lbl=document.getElementById("aap-btn-lbl");
   btn.disabled=true;ico.textContent="⏳";lbl.textContent="Analyzing...";
 
-  // Build canvas snapshot
-  var nodeMap={};
-  nids.forEach(function(nid){nodeMap[nid]=nodes[nid];});
+  var nodeMap={};nids.forEach(function(nid){nodeMap[nid]=nodes[nid];});
   var payload={canvas:{nodes:nodeMap,conns:conns}};
-
   var body=document.getElementById("aap-body");
   body.innerHTML='<div style="padding:20px;text-align:center;color:#555"><div style="font-size:24px;margin-bottom:8px;animation:inf-spin 1s linear infinite;display:inline-block">⚙️</div><div style="font-size:11px">Claude is reviewing your architecture...</div></div>';
 
-  fetch("/architect/analyze",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(payload),
-    credentials:"include"
-  }).then(function(res){
+  try{
+    var res=await fetch("/architect/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),credentials:"include"});
     var reader=res.body.getReader();
     var decoder=new TextDecoder();
-    _aapRawJson="";
-    function read(){
-      reader.read().then(function(d){
-        if(d.done){
-          btn.disabled=false;ico.textContent="⚡";lbl.textContent="Re-Analyze";
-          _renderArchAgentResult(_aapRawJson);
-          return;
-        }
-        var lines=decoder.decode(d.value).split("\n");
-        lines.forEach(function(line){
-          if(line.startsWith("data: ")){
-            var chunk=line.slice(6);
-            if(chunk==="[DONE]")return;
-            if(chunk.startsWith("[ERROR]")){body.innerHTML='<div style="color:#f87171;padding:16px;font-size:11px">'+chunk+'</div>';return;}
-            _aapRawJson+=chunk.replace(/\\n/g,"\n");
-          }
-        });
-        read();
-      });
+    var raw="";
+    while(true){
+      var result=await reader.read();if(result.done)break;
+      var lines=decoder.decode(result.value).split("\n");
+      for(var i=0;i<lines.length;i++){
+        var line=lines[i];
+        if(!line.startsWith("data: "))continue;
+        var chunk=line.slice(6).trim();
+        if(chunk==="[DONE]")break;
+        if(chunk.startsWith("[ERROR]")){body.innerHTML='<div style="color:#f87171;padding:16px;font-size:11px">'+chunk+'</div>';btn.disabled=false;ico.textContent="⚡";lbl.textContent="Re-Analyze";return;}
+        raw+=chunk.replace(/\\n/g,"\n");
+      }
     }
-    read();
-  }).catch(function(e){
+    btn.disabled=false;ico.textContent="⚡";lbl.textContent="Re-Analyze";
+    _renderArchAgentResult(raw);
+  }catch(e){
     btn.disabled=false;ico.textContent="⚡";lbl.textContent="Analyze Architecture";
     body.innerHTML='<div style="color:#f87171;padding:16px;font-size:11px">Error: '+e.message+'</div>';
   });
