@@ -358,6 +358,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
       <span class="zl" id="zoom-label">100%</span>
       <button class="tbb" onclick="zoomIn()" title="Zoom in">+</button>
       <button class="tbb" onclick="zoomReset()" title="Reset zoom">↺</button>
+      <button class="tbb" onclick="autoArrange()" title="Auto-arrange nodes" style="background:#0d1a0d;border-color:#166534;color:#4ade80">⊞ Set</button>
       <div style="flex:1"></div>
       <button onclick="openArchitect()" style="padding:5px 14px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;color:#fff;display:flex;align-items:center;gap:6px;flex-shrink:0">🏗 Architect</button>
       <button class="tbb" onclick="validateArchitecture()" style="background:#0a1a0a;border-color:#166534;color:#4ade80">🔍 Validate</button>
@@ -1415,15 +1416,12 @@ function updateReadiness(){
     var pct=Math.min(getNodeReadinessPct(nid),100);
     totalPct+=pct;
     var arc=document.getElementById(nid+"-rarc");
-    var txt=document.getElementById(nid+"-rpct");
-    if(!arc||!txt)return;
+    if(!arc)return;
     var circ=50.27;
     var dash=Math.round((pct/100)*circ);
     arc.setAttribute("stroke-dasharray",dash+" "+circ);
     var col=pct>=80?"#4ade80":pct>=50?"#fbbf24":"#f87171";
     arc.setAttribute("stroke",col);
-    txt.setAttribute("fill",col);
-    txt.textContent=pct+"%";
   });
   var avg=Math.round(totalPct/nids.length);
   var rb=document.getElementById("readiness-badge");
@@ -1641,7 +1639,7 @@ function createNode(meta,x,y){
   foot.innerHTML='<div class="ndot" id="'+id+'-dot"></div><span class="node-st" id="'+id+'-st">Click to configure</span><span class="cost-badge" id="'+id+'-cost">'+getNodeCost(meta.id,{})+'</span><div class="conn-btn" id="'+id+'-cbtn">+</div>';
   // Readiness ring (top-right corner)
   var ring=document.createElement("div");ring.className="node-ring";ring.id=id+"-ring";
-  ring.innerHTML='<svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="8" fill="none" stroke="#1e1e30" stroke-width="2.5"/><circle id="'+id+'-rarc" cx="11" cy="11" r="8" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-dasharray="0 50.27" stroke-linecap="round" transform="rotate(-90 11 11)" style="transition:stroke-dasharray 0.5s ease,stroke 0.4s"/><text id="'+id+'-rpct" x="11" y="14.5" text-anchor="middle" font-size="5.5" font-weight="700" fill="#4ade80" font-family="monospace">0%</text></svg>';
+  ring.innerHTML='<svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="8" fill="none" stroke="#1e1e30" stroke-width="2.5"/><circle id="'+id+'-rarc" cx="11" cy="11" r="8" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-dasharray="0 50.27" stroke-linecap="round" transform="rotate(-90 11 11)" style="transition:stroke-dasharray 0.5s ease,stroke 0.4s"/></svg>';
   el.appendChild(ring);
   // Connect tip label
   var tip=document.createElement("div");tip.className="connect-tip";
@@ -2839,6 +2837,40 @@ function applyTransform(){
 function zoomIn(){zoom=Math.min(2,+(zoom+0.1).toFixed(1));applyTransform();}
 function zoomOut(){zoom=Math.max(0.2,+(zoom-0.1).toFixed(1));applyTransform();}
 function zoomReset(){zoom=1;panX=0;panY=0;applyTransform();}
+function autoArrange(){
+  var nids=Object.keys(nodes);
+  if(!nids.length)return;
+  // Group nodes by their service group for clustered layout
+  var groups_map={};
+  nids.forEach(function(nid){
+    var g=(nodes[nid].meta.group||nodes[nid].meta.grp||"other").toLowerCase();
+    if(!groups_map[g])groups_map[g]=[];
+    groups_map[g].push(nid);
+  });
+  var GROUP_ORDER=["network","compute","serverless","container","k8s","database","cache","storage","messaging","streaming","monitoring","security","auth","cicd","gitops","iac","cfgmgmt","proxy","mesh","registry","other"];
+  var cols=Math.ceil(Math.sqrt(Object.keys(groups_map).length));
+  var PAD_X=220,PAD_Y=160,START_X=60,START_Y=60;
+  var col=0,row=0,prevGroup=null;
+  var nodeW=170,nodeH=80,groupPad=50;
+  GROUP_ORDER.forEach(function(grpName){
+    var ids=groups_map[grpName];
+    if(!ids||!ids.length)return;
+    var gx=START_X+(col*(PAD_X+groupPad));
+    var gy=START_Y+(row*(PAD_Y*2+groupPad));
+    ids.forEach(function(nid,i){
+      var nx=gx+(i%2)*(nodeW+20);
+      var ny=gy+Math.floor(i/2)*(nodeH+20);
+      nodes[nid].x=nx;nodes[nid].y=ny;
+      var el=document.getElementById(nid);
+      if(el){el.style.left=nx+"px";el.style.top=ny+"px";}
+    });
+    col++;
+    if(col>=cols){col=0;row++;}
+  });
+  drawLines();updateReadiness();
+  zoom=1;panX=40;panY=40;applyTransform();
+  showNotif("ok","Arranged!","All nodes aligned by service type.","",2500);
+}
 cvs.addEventListener("wheel",function(e){
   var dp=document.getElementById("deploy-panel");var ap=document.getElementById("aws-scanner");
   if((dp&&dp.style.display==="flex")||(ap&&ap.style.display==="flex"))return;
