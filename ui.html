@@ -1534,21 +1534,24 @@ function drawLines(){
     (function(c){
       var a=vpcs[c.f],b=vpcs[c.t];
       if(!a||!b)return;
-      // Find closest edges
+      // Find closest edges — prefer horizontal when dx > 0.6*dy
       var acx=a.x+a.w/2, acy=a.y+a.h/2;
       var bcx=b.x+b.w/2, bcy=b.y+b.h/2;
       var ax,ay,bx,by;
       var dx=bcx-acx, dy=bcy-acy;
-      if(Math.abs(dx)>=Math.abs(dy)){
+      var useHoriz=Math.abs(dx)>=Math.abs(dy)*0.6;
+      if(useHoriz){
         ax=dx>0?a.x+a.w:a.x; ay=acy;
         bx=dx>0?b.x:b.x+b.w; by=bcy;
       } else {
         ax=acx; ay=dy>0?a.y+a.h:a.y;
         bx=bcx; by=dy>0?b.y:b.y+b.h;
       }
-      var mx=(ax+bx)/2;
+      var mx=(ax+bx)/2, my=(ay+by)/2;
       var path=document.createElementNS("http://www.w3.org/2000/svg","path");
-      path.setAttribute("d","M"+ax+","+ay+" C"+mx+","+ay+" "+mx+","+by+" "+bx+","+by);
+      var d=useHoriz?"M"+ax+","+ay+" C"+mx+","+ay+" "+mx+","+by+" "+bx+","+by
+                    :"M"+ax+","+ay+" C"+ax+","+my+" "+bx+","+my+" "+bx+","+by;
+      path.setAttribute("d",d);
       path.setAttribute("fill","none");path.setAttribute("stroke","#f59e0b");path.setAttribute("stroke-width","2");
       path.setAttribute("stroke-dasharray","8 4");
       path.setAttribute("marker-end","url(#arr-vpc-e)");
