@@ -2349,6 +2349,73 @@ def chat(req: ChatRequest, request: Request):
 
     return StreamingResponse(stream(), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
+
+# ── ARCHITECTURE AGENT ────────────────────────────────────────────────────────
+class ArchAnalyzeRequest(BaseModel):
+    canvas: dict  # {nodes: {...}, conns: [...]}
+
+@app.post("/architect/analyze")
+@limiter.limit("20/minute")
+def architect_analyze(req: ArchAnalyzeRequest, request: Request):
+    require_auth(request)
+
+    nodes = req.canvas.get("nodes", {})
+    conns = req.canvas.get("conns", [])
+
+    node_list = [{"id": nid, "service": n.get("meta", {}).get("id",""), "label": n.get("meta", {}).get("label",""), "group": n.get("meta", {}).get("group","")} for nid, n in nodes.items()]
+    conn_list = [{"from": c.get("f",""), "to": c.get("t","")} for c in conns]
+    node_labels = {n["id"]: n["label"] for n in node_list}
+    conn_desc = [f"{node_labels.get(c['from'], c['from'])} → {node_labels.get(c['to'], c['to'])}" for c in conn_list]
+
+    system = (
+        "You are a senior cloud architect AI. Analyze the given architecture canvas and return ONLY valid JSON — no markdown, no explanation outside the JSON. "
+        "Return this exact structure:\n"
+        "{\n"
+        '  "score": <0-100 architecture quality score>,\n'
+        '  "summary": "<2-sentence overall assessment>",\n'
+        '  "issues": [{"title": "...", "detail": "..."}],\n'
+        '  "remove_conns": [{"from_label": "...", "to_label": "...", "reason": "..."}],\n'
+        '  "add_conns": [{"from_label": "...", "to_label": "...", "reason": "..."}],\n'
+        '  "add_services": [{"id": "<service_id>", "label": "<display name>", "group": "<group>", "reason": "..."}],\n'
+        '  "remove_services": [{"label": "...", "reason": "..."}],\n'
+        '  "best_practices": ["tip1", "tip2"]\n'
+        "}\n\n"
+        "Service group values: compute, serverless, container, k8s, database, cache, storage, network, api, security, monitoring, messaging, streaming, cicd, gitops, iac, registry, auth, proxy, mesh.\n"
+        "Architecture rules to enforce:\n"
+        "- Dockerfile/container images are BUILD artifacts managed by CI/CD (GitHub Actions, Jenkins). They should NOT connect directly to ALB, S3, IAM, or databases.\n"
+        "- ALB must sit IN FRONT of compute/containers, not be connected to Dockerfile.\n"
+        "- IAM Role attaches to EC2/Lambda/ECS at runtime, not to build artifacts.\n"
+        "- EC2 needs a VPC. Lambda needs a VPC if accessing private resources.\n"
+        "- Every compute service should have monitoring (CloudWatch/Prometheus).\n"
+        "- Secrets (DB passwords, API keys) should use Secrets Manager or SSM, not hardcoded.\n"
+        "- Production workloads need ALB + Auto Scaling + Multi-AZ RDS.\n"
+        "- CI/CD (GitHub Actions) connects to: ECR (push image), EC2/ECS/EKS (deploy), S3 (artifacts).\n"
+        "- CloudFront connects to: S3 (static origin) or ALB (dynamic origin).\n"
+        "- WAF connects to: ALB or CloudFront, not directly to EC2.\n"
+    )
+
+    user_msg = f"Canvas nodes:\n{json.dumps(node_list, indent=2)}\n\nConnections:\n{json.dumps(conn_desc, indent=2)}"
+
+    def stream():
+        try:
+            with client.messages.stream(
+                model="claude-sonnet-4-6",
+                max_tokens=2000,
+                system=system,
+                messages=[{"role": "user", "content": user_msg}]
+            ) as s:
+                for text in s.text_stream:
+                    safe = text.replace('\n', '\\n')
+                    yield f"data: {safe}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            logger.error(f"Architect analyze error: {e}")
+            yield f"data: [ERROR] {str(e)}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
+
 # ── GITHUB IMPORT → CANVAS ────────────────────────────────────────────────────
 
 class GitHubImportRequest(BaseModel):

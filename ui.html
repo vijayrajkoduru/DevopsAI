@@ -5892,5 +5892,310 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 </script>
+
+<!-- ── ARCH AGENT BUBBLE + PANEL ─────────────────────────────────────── -->
+<style>
+#arch-agent-bubble{position:fixed;bottom:28px;right:28px;z-index:9000;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#6c47ff,#a78bfa);box-shadow:0 4px 20px rgba(108,71,255,0.5);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:22px;transition:transform 0.2s,box-shadow 0.2s;border:none}
+#arch-agent-bubble:hover{transform:scale(1.1);box-shadow:0 6px 28px rgba(108,71,255,0.7)}
+#arch-agent-bubble .bubble-pulse{position:absolute;width:100%;height:100%;border-radius:50%;background:rgba(108,71,255,0.3);animation:bubble-ping 2s ease-out infinite}
+@keyframes bubble-ping{0%{transform:scale(1);opacity:0.6}100%{transform:scale(1.8);opacity:0}}
+#arch-agent-panel{position:fixed;bottom:92px;right:28px;width:380px;max-height:78vh;background:#0a0a16;border:1px solid #2a2a40;border-radius:16px;z-index:9001;display:none;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,0.7);overflow:hidden}
+#arch-agent-panel.open{display:flex}
+.aap-head{display:flex;align-items:center;gap:10px;padding:14px 16px;background:#0d0d1e;border-bottom:1px solid #1e1e30;flex-shrink:0}
+.aap-body{flex:1;overflow-y:auto;padding:14px 16px}
+.aap-foot{padding:10px 14px;background:#0d0d1e;border-top:1px solid #1e1e30;flex-shrink:0}
+.aap-score{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;flex-shrink:0;border:3px solid #4ade80}
+.aap-issue{background:#130a0a;border:1px solid #3f1a1a;border-radius:8px;padding:9px 12px;margin-bottom:7px;font-size:11px;color:#f87171}
+.aap-fix-btn{display:inline-flex;align-items:center;gap:5px;margin-top:5px;padding:3px 10px;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;border:none;transition:opacity 0.15s}
+.aap-section-title{font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:1px;margin:12px 0 6px}
+.aap-practice{display:flex;gap:7px;margin-bottom:6px;font-size:11px;color:#888;line-height:1.4}
+</style>
+
+<!-- Arch Agent Floating Bubble -->
+<button id="arch-agent-bubble" onclick="toggleArchAgent()" title="AI Architecture Agent">
+  <div class="bubble-pulse"></div>
+  🤖
+</button>
+
+<!-- Arch Agent Panel -->
+<div id="arch-agent-panel">
+  <div class="aap-head">
+    <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#6c47ff,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">🤖</div>
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:800;color:#fff">Arch Agent</div>
+      <div style="font-size:10px;color:#555">Powered by Claude — real-time architecture review</div>
+    </div>
+    <div id="aap-agent-dot" style="width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 6px #4ade80;flex-shrink:0"></div>
+    <button onclick="toggleArchAgent()" style="background:none;border:none;color:#555;cursor:pointer;font-size:16px;padding:0 0 0 6px">✕</button>
+  </div>
+  <div class="aap-body" id="aap-body">
+    <div style="text-align:center;padding:30px 20px;color:#444">
+      <div style="font-size:32px;margin-bottom:10px">🏗</div>
+      <div style="font-size:12px;margin-bottom:6px;color:#666">Drop services on the canvas then click Analyze to get AI architectural review and auto-fixes.</div>
+    </div>
+  </div>
+  <div class="aap-foot">
+    <button onclick="runArchAgent()" id="aap-analyze-btn" style="width:100%;padding:10px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:9px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px">
+      <span id="aap-btn-ico">⚡</span> <span id="aap-btn-lbl">Analyze Architecture</span>
+    </button>
+  </div>
+</div>
+
+<script>
+var _aapOpen=false;
+function toggleArchAgent(){
+  _aapOpen=!_aapOpen;
+  document.getElementById("arch-agent-panel").classList.toggle("open",_aapOpen);
+}
+
+var _aapRawJson="";
+function runArchAgent(){
+  var nids=Object.keys(nodes);
+  if(!nids.length){showNotif("warn","Empty Canvas","Add some services first.","",3000);return;}
+
+  var btn=document.getElementById("aap-analyze-btn");
+  var ico=document.getElementById("aap-btn-ico");
+  var lbl=document.getElementById("aap-btn-lbl");
+  btn.disabled=true;ico.textContent="⏳";lbl.textContent="Analyzing...";
+
+  // Build canvas snapshot
+  var nodeMap={};
+  nids.forEach(function(nid){nodeMap[nid]=nodes[nid];});
+  var payload={canvas:{nodes:nodeMap,conns:conns}};
+
+  var body=document.getElementById("aap-body");
+  body.innerHTML='<div style="padding:20px;text-align:center;color:#555"><div style="font-size:24px;margin-bottom:8px;animation:inf-spin 1s linear infinite;display:inline-block">⚙️</div><div style="font-size:11px">Claude is reviewing your architecture...</div></div>';
+
+  fetch("/architect/analyze",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(payload),
+    credentials:"include"
+  }).then(function(res){
+    var reader=res.body.getReader();
+    var decoder=new TextDecoder();
+    _aapRawJson="";
+    function read(){
+      reader.read().then(function(d){
+        if(d.done){
+          btn.disabled=false;ico.textContent="⚡";lbl.textContent="Re-Analyze";
+          _renderArchAgentResult(_aapRawJson);
+          return;
+        }
+        var lines=decoder.decode(d.value).split("\n");
+        lines.forEach(function(line){
+          if(line.startsWith("data: ")){
+            var chunk=line.slice(6);
+            if(chunk==="[DONE]")return;
+            if(chunk.startsWith("[ERROR]")){body.innerHTML='<div style="color:#f87171;padding:16px;font-size:11px">'+chunk+'</div>';return;}
+            _aapRawJson+=chunk.replace(/\\n/g,"\n");
+          }
+        });
+        read();
+      });
+    }
+    read();
+  }).catch(function(e){
+    btn.disabled=false;ico.textContent="⚡";lbl.textContent="Analyze Architecture";
+    body.innerHTML='<div style="color:#f87171;padding:16px;font-size:11px">Error: '+e.message+'</div>';
+  });
+}
+
+function _renderArchAgentResult(raw){
+  var body=document.getElementById("aap-body");
+  var data;
+  try{
+    var jsonStart=raw.indexOf("{");var jsonEnd=raw.lastIndexOf("}");
+    data=JSON.parse(raw.slice(jsonStart,jsonEnd+1));
+  }catch(e){
+    body.innerHTML='<div style="color:#f87171;padding:12px;font-size:11px">Could not parse response. Raw:<br><pre style="font-size:9px;color:#555;white-space:pre-wrap">'+raw.slice(0,400)+'</pre></div>';return;
+  }
+
+  var score=data.score||0;
+  var scoreCol=score>=80?"#4ade80":score>=50?"#fbbf24":"#f87171";
+  var html='<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:12px;background:#0d0d1e;border-radius:10px">'
+    +'<div class="aap-score" style="border-color:'+scoreCol+';color:'+scoreCol+'">'+score+'</div>'
+    +'<div style="flex:1"><div style="font-size:12px;font-weight:700;color:#fff;margin-bottom:3px">Architecture Score</div>'
+    +'<div style="font-size:10px;color:#888;line-height:1.4">'+(data.summary||"")+'</div></div></div>';
+
+  // Issues
+  if(data.issues&&data.issues.length){
+    html+='<div class="aap-section-title">🔴 Issues ('+data.issues.length+')</div>';
+    data.issues.forEach(function(iss){
+      html+='<div class="aap-issue"><strong>'+iss.title+'</strong><br>'+iss.detail+'</div>';
+    });
+  }
+
+  // Wrong connections to remove
+  if(data.remove_conns&&data.remove_conns.length){
+    html+='<div class="aap-section-title">✂️ Remove These Connections</div>';
+    data.remove_conns.forEach(function(rc,i){
+      html+='<div style="background:#130a0a;border:1px solid #2a1010;border-radius:8px;padding:8px 12px;margin-bottom:6px">'
+        +'<div style="font-size:11px;color:#f87171;font-weight:600">'+rc.from_label+' → '+rc.to_label+'</div>'
+        +'<div style="font-size:10px;color:#666;margin:3px 0">'+rc.reason+'</div>'
+        +'<button class="aap-fix-btn" style="background:#3f1a1a;color:#f87171" onclick="aapRemoveConn(\''+rc.from_label+'\',\''+rc.to_label+'\',this)">✂ Remove Connection</button>'
+        +'</div>';
+    });
+  }
+
+  // Connections to add
+  if(data.add_conns&&data.add_conns.length){
+    html+='<div class="aap-section-title">🔗 Add These Connections</div>';
+    data.add_conns.forEach(function(ac){
+      html+='<div style="background:#0d1a0d;border:1px solid #1a3a1a;border-radius:8px;padding:8px 12px;margin-bottom:6px">'
+        +'<div style="font-size:11px;color:#4ade80;font-weight:600">'+ac.from_label+' → '+ac.to_label+'</div>'
+        +'<div style="font-size:10px;color:#666;margin:3px 0">'+ac.reason+'</div>'
+        +'<button class="aap-fix-btn" style="background:#0d2a0d;color:#4ade80" onclick="aapAddConn(\''+ac.from_label+'\',\''+ac.to_label+'\',this)">↔ Add Connection</button>'
+        +'</div>';
+    });
+  }
+
+  // Services to add
+  if(data.add_services&&data.add_services.length){
+    html+='<div class="aap-section-title">➕ Missing Services</div>';
+    data.add_services.forEach(function(svc){
+      html+='<div style="background:#0d0d20;border:1px solid #2a2a40;border-radius:8px;padding:8px 12px;margin-bottom:6px">'
+        +'<div style="font-size:11px;color:#a78bfa;font-weight:600">'+svc.label+'</div>'
+        +'<div style="font-size:10px;color:#666;margin:3px 0">'+svc.reason+'</div>'
+        +'<button class="aap-fix-btn" style="background:#1a1a3a;color:#a78bfa" onclick="aapAddService(\''+svc.id+'\',\''+svc.label+'\',\''+svc.group+'\',this)">+ Add to Canvas</button>'
+        +'</div>';
+    });
+  }
+
+  // Services to remove
+  if(data.remove_services&&data.remove_services.length){
+    html+='<div class="aap-section-title">🗑 Remove These Services</div>';
+    data.remove_services.forEach(function(svc){
+      html+='<div style="background:#130a0a;border:1px solid #2a1010;border-radius:8px;padding:8px 12px;margin-bottom:6px">'
+        +'<div style="font-size:11px;color:#f87171;font-weight:600">'+svc.label+'</div>'
+        +'<div style="font-size:10px;color:#666;margin:3px 0">'+svc.reason+'</div>'
+        +'<button class="aap-fix-btn" style="background:#3f1a1a;color:#f87171" onclick="aapRemoveService(\''+svc.label+'\',this)">🗑 Remove</button>'
+        +'</div>';
+    });
+  }
+
+  // Best practices
+  if(data.best_practices&&data.best_practices.length){
+    html+='<div class="aap-section-title">💡 Best Practices</div>';
+    data.best_practices.forEach(function(tip){
+      html+='<div class="aap-practice"><span style="color:#fbbf24;flex-shrink:0">→</span>'+tip+'</div>';
+    });
+  }
+
+  // Fix All button
+  html+='<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e1e30">'
+    +'<button onclick="aapFixAll()" style="width:100%;padding:9px;background:linear-gradient(135deg,#166534,#15803d);border:none;border-radius:8px;color:#4ade80;font-size:12px;font-weight:700;cursor:pointer">⚡ Auto-Fix All Issues</button>'
+    +'</div>';
+
+  body.innerHTML=html;
+  // Store result for fix-all
+  window._aapData=data;
+}
+
+function aapRemoveConn(fromLabel, toLabel, btn){
+  var removed=false;
+  Object.keys(nodes).forEach(function(fid){
+    if((nodes[fid].config&&nodes[fid].config.name||nodes[fid].meta.label)===fromLabel||nodes[fid].meta.label===fromLabel){
+      Object.keys(nodes).forEach(function(tid){
+        if((nodes[tid].config&&nodes[tid].config.name||nodes[tid].meta.label)===toLabel||nodes[tid].meta.label===toLabel){
+          conns=conns.filter(function(c){return !((c.f===fid&&c.t===tid)||(c.f===tid&&c.t===fid));});
+          removed=true;
+        }
+      });
+    }
+  });
+  if(removed){drawLines();btn.textContent="✓ Removed";btn.style.background="#0d2a0d";btn.style.color="#4ade80";btn.disabled=true;}
+  else{btn.textContent="Not found";btn.disabled=true;}
+}
+
+function aapAddConn(fromLabel, toLabel, btn){
+  var fid=null,tid=null;
+  Object.keys(nodes).forEach(function(nid){
+    var lbl=nodes[nid].config&&nodes[nid].config.name?nodes[nid].config.name:nodes[nid].meta.label;
+    if(lbl===fromLabel||nodes[nid].meta.label===fromLabel)fid=nid;
+    if(lbl===toLabel||nodes[nid].meta.label===toLabel)tid=nid;
+  });
+  if(fid&&tid){
+    var already=conns.some(function(c){return (c.f===fid&&c.t===tid)||(c.f===tid&&c.t===fid);});
+    if(!already)conns.push({f:fid,t:tid});
+    drawLines();updateReadiness();
+    btn.textContent="✓ Connected";btn.style.background="#0d3a0d";btn.disabled=true;
+  } else {
+    // Services not on canvas yet
+    btn.textContent="Add services first";btn.disabled=true;
+  }
+}
+
+function aapAddService(id,label,group,btn){
+  var meta={id:id,label:label,catName:"AWS",subName:"",group:group||"compute",catType:"aws"};
+  var cx=150+Math.random()*300,cy=100+Math.random()*200;
+  createNode(meta,cx,cy);
+  btn.textContent="✓ Added";btn.style.background="#1a0a3a";btn.disabled=true;
+  document.getElementById("hint").style.display="none";
+}
+
+function aapRemoveService(label,btn){
+  var found=null;
+  Object.keys(nodes).forEach(function(nid){
+    var lbl=nodes[nid].config&&nodes[nid].config.name?nodes[nid].config.name:nodes[nid].meta.label;
+    if(lbl===label||nodes[nid].meta.label===label)found=nid;
+  });
+  if(found){
+    conns=conns.filter(function(c){return c.f!==found&&c.t!==found;});
+    var el=document.getElementById(found);if(el)el.remove();
+    delete nodes[found];
+    if(selId===found){selId=null;document.getElementById("props").style.display="none";}
+    drawLines();updateReadiness();
+    btn.textContent="✓ Removed";btn.disabled=true;
+  } else {btn.textContent="Not found";btn.disabled=true;}
+}
+
+function aapFixAll(){
+  var d=window._aapData;if(!d)return;
+  var fixes=0;
+  // Remove wrong connections
+  (d.remove_conns||[]).forEach(function(rc){
+    Object.keys(nodes).forEach(function(fid){
+      if(nodes[fid].meta.label===rc.from_label||(nodes[fid].config&&nodes[fid].config.name===rc.from_label)){
+        Object.keys(nodes).forEach(function(tid){
+          if(nodes[tid].meta.label===rc.to_label||(nodes[tid].config&&nodes[tid].config.name===rc.to_label)){
+            var before=conns.length;
+            conns=conns.filter(function(c){return !((c.f===fid&&c.t===tid)||(c.f===tid&&c.t===fid));});
+            if(conns.length<before)fixes++;
+          }
+        });
+      }
+    });
+  });
+  // Add correct connections
+  (d.add_conns||[]).forEach(function(ac){
+    var fid=null,tid=null;
+    Object.keys(nodes).forEach(function(nid){
+      var lbl=nodes[nid].config&&nodes[nid].config.name?nodes[nid].config.name:nodes[nid].meta.label;
+      if(lbl===ac.from_label||nodes[nid].meta.label===ac.from_label)fid=nid;
+      if(lbl===ac.to_label||nodes[nid].meta.label===ac.to_label)tid=nid;
+    });
+    if(fid&&tid){
+      var already=conns.some(function(c){return (c.f===fid&&c.t===tid)||(c.f===tid&&c.t===fid);});
+      if(!already){conns.push({f:fid,t:tid});fixes++;}
+    }
+  });
+  // Remove wrong services
+  (d.remove_services||[]).forEach(function(svc){
+    Object.keys(nodes).forEach(function(nid){
+      var lbl=nodes[nid].config&&nodes[nid].config.name?nodes[nid].config.name:nodes[nid].meta.label;
+      if(lbl===svc.label||nodes[nid].meta.label===svc.label){
+        conns=conns.filter(function(c){return c.f!==nid&&c.t!==nid;});
+        var el=document.getElementById(nid);if(el)el.remove();
+        delete nodes[nid];fixes++;
+      }
+    });
+  });
+  if(selId&&!nodes[selId]){selId=null;document.getElementById("props").style.display="none";}
+  drawLines();updateReadiness();
+  showNotif("ok","Fixed!",fixes+" architectural issues fixed automatically.","Run Analyze again to verify.",4000);
+  setTimeout(runArchAgent,1000);
+}
+</script>
 </body>
 </html>
