@@ -1818,6 +1818,7 @@ class GitHubPushRequest(BaseModel):
     folder: str = ""
     repo_name: str
     commit_message: str = "Auto-push from AI DevOps Platform"
+    canvas_data: str = ""
 
 @app.post("/github/push")
 def github_push(req: GitHubPushRequest):
@@ -1861,6 +1862,12 @@ def github_push(req: GitHubPushRequest):
     # Always push the entire generated/ directory as one repo
     full_path = os.path.abspath(OUTPUT_DIR)
     os.makedirs(full_path, exist_ok=True)
+
+    # Save canvas snapshot so it can be restored on import
+    if req.canvas_data:
+        canvas_file = os.path.join(full_path, "devopsai-canvas.json")
+        with open(canvas_file, "w", encoding="utf-8") as f:
+            f.write(req.canvas_data)
 
     remote_url = f"https://{github_username}:{github_token}@github.com/{github_username}/{repo_name}.git"
     safe_url   = f"https://github.com/{github_username}/{repo_name}.git"
@@ -2251,6 +2258,27 @@ def github_import(req: GitHubImportRequest, request: Request):
             )
             if result.returncode != 0:
                 raise HTTPException(status_code=400, detail=f"Failed to clone repo: {result.stderr[:200]}")
+
+        # Check for canvas snapshot first — full restore takes priority
+        canvas_file = os.path.join(tmp_dir, "devopsai-canvas.json")
+        if os.path.exists(canvas_file):
+            with open(canvas_file, "r", encoding="utf-8") as f:
+                canvas_data = f.read()
+            user_dir = get_user_output_dir(request)
+            dest = os.path.join(user_dir, f"github_{repo}")
+            if os.path.exists(dest):
+                shutil.rmtree(dest)
+            shutil.copytree(tmp_dir, dest, ignore=shutil.ignore_patterns(".git", ".terraform"))
+            return {
+                "success": True,
+                "repo": f"{owner}/{repo}",
+                "canvas_data": canvas_data,
+                "services": [],
+                "total": 0,
+                "folders": {},
+                "local_path": dest,
+                "message": "Canvas snapshot found — restoring full canvas"
+            }
 
         # Scan all .tf files and detect resource types
         services = []

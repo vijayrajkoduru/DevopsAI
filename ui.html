@@ -2602,7 +2602,7 @@ async function doGitHubPush() {
   try {
     var r = await fetch('/github/push', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({folder:'', repo_name:repo, commit_message:msg})
+      body: JSON.stringify({folder:'', repo_name:repo, commit_message:msg, canvas_data:getCanvasData()})
     });
     if (!r.ok) {
       var err = await r.json();
@@ -4864,6 +4864,31 @@ async function startGitHubImport() {
     if (!r.ok || data.detail) {
       status.style.color = '#f87171';
       status.textContent = '✗ ' + (data.detail || 'Import failed');
+      return;
+    }
+
+    // Full canvas snapshot found — restore directly
+    if (data.canvas_data) {
+      try {
+        var saved = JSON.parse(data.canvas_data);
+        document.getElementById('cnodes').innerHTML = '';
+        conns.length = 0;
+        var k = Object.keys(nodes); for(var i=0;i<k.length;i++) delete nodes[k[i]];
+        var v = Object.keys(vpcs);  for(var i=0;i<v.length;i++) delete vpcs[v[i]];
+        var a = Object.keys(azs);   for(var i=0;i<a.length;i++) delete azs[a[i]];
+        nc = saved.nc||0; vc = saved.vc||0; ac = saved.ac||0;
+        if(saved.vpcs){var vk=Object.keys(saved.vpcs);for(var i=0;i<vk.length;i++){vpcs[vk[i]]=saved.vpcs[vk[i]];renderVPC(vk[i]);}}
+        if(saved.azs){var ak=Object.keys(saved.azs);for(var i=0;i<ak.length;i++){azs[ak[i]]=saved.azs[ak[i]];renderAZ(ak[i]);}}
+        if(saved.nodes){var nk=Object.keys(saved.nodes);for(var i=0;i<nk.length;i++){var nd=saved.nodes[nk[i]];nodes[nk[i]]=nd;createNodeFromSaved(nd);}}
+        if(saved.conns){for(var i=0;i<saved.conns.length;i++) conns.push(saved.conns[i]);}
+        drawLines();
+        document.getElementById('hint').style.display = Object.keys(nodes).length===0?'block':'none';
+        closeGitHubImport();
+        showNotif('ok','Canvas Restored!','Full canvas imported from GitHub','',3000);
+      } catch(e) {
+        status.style.color = '#f87171';
+        status.textContent = '✗ Failed to restore canvas: ' + e.message;
+      }
       return;
     }
 
