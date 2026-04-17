@@ -2447,11 +2447,120 @@ function openSettings() {
   closeUserMenu();
   document.getElementById('settings-modal').style.display = 'flex';
   document.getElementById('settings-msg').style.display = 'none';
+  switchVaultTab('aws');
   loadSavedCreds();
+  loadVaultStatus();
 }
 function closeSettings() {
   document.getElementById('settings-modal').style.display = 'none';
 }
+
+// ── CREDENTIALS VAULT ─────────────────────────────────────────────────────────
+function switchVaultTab(tab) {
+  ['aws','github','docker','domain','anthropic'].forEach(function(t) {
+    document.getElementById('vpanel-'+t).style.display = t===tab ? '' : 'none';
+    var el = document.getElementById('vtab-'+t);
+    if (t===tab) el.classList.add('active'); else el.classList.remove('active');
+  });
+}
+
+async function saveVaultService(service, creds, msgId) {
+  var msg = document.getElementById(msgId);
+  msg.style.display = 'none';
+  var entries = Object.entries(creds).filter(function(e){ return e[1] && e[1].trim(); });
+  if (!entries.length) {
+    msg.style.display='block'; msg.style.background='#2a0a0a'; msg.style.color='#f87171';
+    msg.textContent = 'Please fill in at least one field.'; return;
+  }
+  try {
+    for (var i=0; i<entries.length; i++) {
+      var r = await fetch('/vault/save', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({service: service, key_name: entries[i][0], key_value: entries[i][1].trim()})});
+      var d = await r.json();
+      if (!d.saved) throw new Error(d.detail||'Save failed');
+    }
+    msg.style.display='block'; msg.style.background='#0a2a0a'; msg.style.color='#4ade80';
+    msg.textContent = '✔ '+service.charAt(0).toUpperCase()+service.slice(1)+' credentials saved!';
+    loadVaultStatus();
+  } catch(e) {
+    msg.style.display='block'; msg.style.background='#2a0a0a'; msg.style.color='#f87171';
+    msg.textContent = '✗ '+e.message;
+  }
+}
+
+async function testVaultService(service, msgId) {
+  var msg = document.getElementById(msgId);
+  msg.style.display='block'; msg.style.background='#0a0a14'; msg.style.color='#888';
+  msg.textContent = '⏳ Testing...';
+  try {
+    var r = await fetch('/vault/test/'+service, {method:'POST'});
+    var d = await r.json();
+    if (d.valid || d.ok) {
+      msg.style.background='#0a2a0a'; msg.style.color='#4ade80';
+      msg.textContent = '✔ '+(d.message||'Connection successful!');
+    } else {
+      msg.style.background='#2a0a0a'; msg.style.color='#f87171';
+      msg.textContent = '✗ '+(d.error||d.detail||'Test failed');
+    }
+  } catch(e) {
+    msg.style.background='#2a0a0a'; msg.style.color='#f87171';
+    msg.textContent = '✗ Error: '+e.message;
+  }
+}
+
+async function deleteVaultService(service, msgId) {
+  if (!confirm('Remove saved '+service+' credentials?')) return;
+  var msg = document.getElementById(msgId);
+  try {
+    var r = await fetch('/vault/'+service, {method:'DELETE'});
+    var d = await r.json();
+    msg.style.display='block'; msg.style.background='#0a0a14'; msg.style.color='#888';
+    msg.textContent = 'Credentials removed.';
+    // clear input fields for this service
+    var fieldMap = {github:['v-gh-token','v-gh-user'], docker:['v-dk-user','v-dk-pass'],
+                    domain:['v-dm-name'], anthropic:['v-an-key']};
+    (fieldMap[service]||[]).forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+    loadVaultStatus();
+  } catch(e) {
+    msg.style.display='block'; msg.style.background='#2a0a0a'; msg.style.color='#f87171';
+    msg.textContent = '✗ Error removing credentials.';
+  }
+}
+
+async function loadVaultStatus() {
+  try {
+    var r = await fetch('/vault/all/status');
+    var d = await r.json();
+    ['aws','github','docker','domain','anthropic'].forEach(function(s) {
+      var dot = document.getElementById('vst-'+s);
+      if (!dot) return;
+      dot.className = 'vault-status ' + (d[s] ? 'ok' : 'warn');
+    });
+    // also update topbar aws status
+    var credsStatus = document.getElementById('aws-creds-status');
+    if (credsStatus) {
+      if (d.aws) { credsStatus.innerHTML='<span>✅</span> AWS Connected'; credsStatus.style.color='#4ade80'; }
+      else { credsStatus.innerHTML='<span>⚠️</span> AWS Not Configured'; credsStatus.style.color='#fbbf24'; }
+    }
+    // pre-fill non-secret vault fields from /vault/{service}
+    await loadVaultFields('github', {token:'v-gh-token', username:'v-gh-user'});
+    await loadVaultFields('docker', {username:'v-dk-user'});
+    await loadVaultFields('domain', {domain_name:'v-dm-name'});
+  } catch(e) {}
+}
+
+async function loadVaultFields(service, fieldMap) {
+  try {
+    var r = await fetch('/vault/'+service);
+    if (!r.ok) return;
+    var d = await r.json();
+    Object.entries(fieldMap).forEach(function(pair) {
+      var el = document.getElementById(pair[1]);
+      if (el && d[pair[0]]) el.placeholder = d[pair[0]]; // show masked as placeholder
+    });
+  } catch(e) {}
+}
+
 async function loadSavedCreds() {
   try {
     var r = await fetch('/aws/credentials');
@@ -2639,68 +2748,123 @@ async function doGitHubPush() {
 
 <!-- GitHub Push Modal -->
 <!-- ── AWS SETTINGS MODAL ─────────────────────────────────── -->
-<div id="settings-modal" onclick="if(event.target===this)closeSettings()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center">
-  <div style="background:#0f0f1a;border:1px solid #6c47ff;border-radius:14px;padding:28px;width:500px;max-width:95vw">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:22px">
-      <span style="font-size:22px">⚙️</span>
-      <span style="font-size:16px;font-weight:700;color:#fff">AWS Credentials</span>
+<style>
+.vault-tab{padding:7px 14px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;color:#555;border:1px solid transparent;transition:all 0.15s}
+.vault-tab.active{background:#1a1030;border-color:#6c47ff;color:#c4b5fd}
+.vault-tab:hover:not(.active){color:#888;background:#111}
+.vault-inp{width:100%;background:#060610;border:1px solid #1e1e30;border-radius:7px;padding:9px 12px;color:#ddd;font-size:13px;font-family:monospace;outline:none;box-sizing:border-box;transition:border 0.15s}
+.vault-inp:focus{border-color:#6c47ff}
+.vault-lbl{font-size:10px;color:#666;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px}
+.vault-status{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+.vault-status.ok{background:#4ade80}
+.vault-status.warn{background:#fbbf24}
+.vault-status.err{background:#f87171}
+</style>
+<div id="settings-modal" onclick="if(event.target===this)closeSettings()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#0f0f1a;border:1px solid #6c47ff;border-radius:14px;padding:24px;width:560px;max-width:96vw;max-height:92vh;overflow-y:auto">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+      <span style="font-size:20px">🔑</span>
+      <span style="font-size:16px;font-weight:700;color:#fff">Credentials Vault</span>
+      <span style="font-size:11px;color:#555;margin-left:4px">— stored securely per user</span>
       <span onclick="closeSettings()" style="margin-left:auto;cursor:pointer;color:#555;font-size:18px;line-height:1">✕</span>
     </div>
-    <!-- Status badge -->
-    <div id="settings-status-bar" style="display:none;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;display:flex;align-items:center;gap:8px"></div>
-    <!-- Saved creds display -->
-    <div id="settings-saved-creds" style="display:none;background:#060610;border:1px solid #1e1e30;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:#888">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="color:#4ade80;font-weight:600">✔ Credentials Saved</span>
-        <button onclick="clearSavedCreds()" style="background:#2a0a0a;border:1px solid #5a1a1a;border-radius:5px;color:#f87171;font-size:10px;padding:2px 8px;cursor:pointer">Remove</button>
+
+    <!-- Tab bar -->
+    <div style="display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap">
+      <div class="vault-tab active" id="vtab-aws" onclick="switchVaultTab('aws')">☁️ AWS <span class="vault-status warn" id="vst-aws"></span></div>
+      <div class="vault-tab" id="vtab-github" onclick="switchVaultTab('github')">🐙 GitHub <span class="vault-status warn" id="vst-github"></span></div>
+      <div class="vault-tab" id="vtab-docker" onclick="switchVaultTab('docker')">🐳 Docker <span class="vault-status warn" id="vst-docker"></span></div>
+      <div class="vault-tab" id="vtab-domain" onclick="switchVaultTab('domain')">🌐 Domain <span class="vault-status warn" id="vst-domain"></span></div>
+      <div class="vault-tab" id="vtab-anthropic" onclick="switchVaultTab('anthropic')">🤖 Anthropic <span class="vault-status warn" id="vst-anthropic"></span></div>
+    </div>
+
+    <!-- AWS Tab -->
+    <div id="vpanel-aws">
+      <div id="settings-saved-creds" style="display:none;background:#060610;border:1px solid #1e1e30;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#888">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="color:#4ade80;font-weight:600">✔ AWS Saved</span>
+          <button onclick="clearSavedCreds()" style="background:#2a0a0a;border:1px solid #5a1a1a;border-radius:5px;color:#f87171;font-size:10px;padding:2px 8px;cursor:pointer">Remove</button>
+        </div>
+        <div>Access Key: <span id="settings-ak-masked" style="color:#c4b5fd;font-family:monospace"></span></div>
+        <div>Region: <span id="settings-region-display" style="color:#c4b5fd"></span></div>
       </div>
-      <div>Access Key: <span id="settings-ak-masked" style="color:#c4b5fd;font-family:monospace"></span></div>
-      <div>Region: <span id="settings-region-display" style="color:#c4b5fd"></span></div>
+      <div style="margin-bottom:10px"><label class="vault-lbl">AWS Access Key ID</label><input id="settings-ak" type="text" placeholder="AKIA..." class="vault-inp"></div>
+      <div style="margin-bottom:10px"><label class="vault-lbl">AWS Secret Access Key</label><input id="settings-sk" type="password" placeholder="Your secret key..." class="vault-inp"></div>
+      <div style="margin-bottom:16px">
+        <label class="vault-lbl">Default Region</label>
+        <select id="settings-region" class="vault-inp" style="cursor:pointer">
+          <option value="us-east-1">us-east-1 — US East (N. Virginia)</option>
+          <option value="us-east-2">us-east-2 — US East (Ohio)</option>
+          <option value="us-west-1">us-west-1 — US West (N. California)</option>
+          <option value="us-west-2">us-west-2 — US West (Oregon)</option>
+          <option value="eu-west-1">eu-west-1 — Europe (Ireland)</option>
+          <option value="eu-central-1">eu-central-1 — Europe (Frankfurt)</option>
+          <option value="ap-south-1">ap-south-1 — Asia Pacific (Mumbai)</option>
+          <option value="ap-southeast-1">ap-southeast-1 — Asia Pacific (Singapore)</option>
+          <option value="ap-southeast-2">ap-southeast-2 — Asia Pacific (Sydney)</option>
+          <option value="ap-northeast-1">ap-northeast-1 — Asia Pacific (Tokyo)</option>
+          <option value="sa-east-1">sa-east-1 — South America (São Paulo)</option>
+          <option value="ca-central-1">ca-central-1 — Canada (Central)</option>
+          <option value="me-south-1">me-south-1 — Middle East (Bahrain)</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="saveAwsCreds()" style="flex:1;padding:10px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">💾 Save AWS</button>
+        <button onclick="testAwsCreds()" id="settings-test-btn" style="padding:10px 16px;background:#13131f;border:1px solid #2a2a40;border-radius:8px;color:#a78bfa;font-size:13px;cursor:pointer">🔗 Test</button>
+      </div>
+      <div id="settings-msg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:7px;font-size:12px"></div>
     </div>
-    <!-- Input form -->
-    <div style="margin-bottom:12px">
-      <label style="font-size:10px;color:#666;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">AWS Access Key ID</label>
-      <input id="settings-ak" type="text" placeholder="AKIA..."
-        style="width:100%;background:#060610;border:1px solid #1e1e30;border-radius:7px;padding:9px 12px;color:#ddd;font-size:13px;font-family:monospace;outline:none;box-sizing:border-box"
-        onfocus="this.style.borderColor='#6c47ff'" onblur="this.style.borderColor='#1e1e30'">
+
+    <!-- GitHub Tab -->
+    <div id="vpanel-github" style="display:none">
+      <div style="margin-bottom:10px"><label class="vault-lbl">GitHub Personal Access Token</label><input id="v-gh-token" type="password" placeholder="ghp_..." class="vault-inp"></div>
+      <div style="margin-bottom:16px"><label class="vault-lbl">GitHub Username</label><input id="v-gh-user" type="text" placeholder="your-github-username" class="vault-inp"></div>
+      <div style="font-size:11px;color:#555;margin-bottom:14px">Get token at: <a href="https://github.com/settings/tokens" target="_blank" style="color:#6c47ff">github.com/settings/tokens</a> — needs <b style="color:#888">repo</b> scope</div>
+      <div style="display:flex;gap:8px">
+        <button onclick="saveVaultService('github',{token:document.getElementById('v-gh-token').value,username:document.getElementById('v-gh-user').value},'v-gh-msg')" style="flex:1;padding:10px;background:linear-gradient(135deg,#238636,#2ea043);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">💾 Save GitHub</button>
+        <button onclick="testVaultService('github','v-gh-msg')" style="padding:10px 16px;background:#13131f;border:1px solid #2a2a40;border-radius:8px;color:#3fb950;font-size:13px;cursor:pointer">🔗 Test</button>
+        <button onclick="deleteVaultService('github','v-gh-msg')" style="padding:10px 14px;background:#13131f;border:1px solid #3a1a1a;border-radius:8px;color:#f87171;font-size:13px;cursor:pointer">✕</button>
+      </div>
+      <div id="v-gh-msg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:7px;font-size:12px"></div>
     </div>
-    <div style="margin-bottom:12px">
-      <label style="font-size:10px;color:#666;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">AWS Secret Access Key</label>
-      <input id="settings-sk" type="password" placeholder="Your secret key..."
-        style="width:100%;background:#060610;border:1px solid #1e1e30;border-radius:7px;padding:9px 12px;color:#ddd;font-size:13px;font-family:monospace;outline:none;box-sizing:border-box"
-        onfocus="this.style.borderColor='#6c47ff'" onblur="this.style.borderColor='#1e1e30'">
+
+    <!-- Docker Tab -->
+    <div id="vpanel-docker" style="display:none">
+      <div style="margin-bottom:10px"><label class="vault-lbl">Docker Hub Username</label><input id="v-dk-user" type="text" placeholder="your-dockerhub-username" class="vault-inp"></div>
+      <div style="margin-bottom:16px"><label class="vault-lbl">Docker Hub Password / Access Token</label><input id="v-dk-pass" type="password" placeholder="Password or access token" class="vault-inp"></div>
+      <div style="font-size:11px;color:#555;margin-bottom:14px">Get access token at: <a href="https://hub.docker.com/settings/security" target="_blank" style="color:#2496ed">hub.docker.com/settings/security</a></div>
+      <div style="display:flex;gap:8px">
+        <button onclick="saveVaultService('docker',{username:document.getElementById('v-dk-user').value,password:document.getElementById('v-dk-pass').value},'v-dk-msg')" style="flex:1;padding:10px;background:linear-gradient(135deg,#1d6fa4,#2496ed);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">💾 Save Docker</button>
+        <button onclick="testVaultService('docker','v-dk-msg')" style="padding:10px 16px;background:#13131f;border:1px solid #2a2a40;border-radius:8px;color:#2496ed;font-size:13px;cursor:pointer">🔗 Test</button>
+        <button onclick="deleteVaultService('docker','v-dk-msg')" style="padding:10px 14px;background:#13131f;border:1px solid #3a1a1a;border-radius:8px;color:#f87171;font-size:13px;cursor:pointer">✕</button>
+      </div>
+      <div id="v-dk-msg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:7px;font-size:12px"></div>
     </div>
-    <div style="margin-bottom:20px">
-      <label style="font-size:10px;color:#666;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px">Default Region</label>
-      <select id="settings-region"
-        style="width:100%;background:#060610;border:1px solid #1e1e30;border-radius:7px;padding:9px 12px;color:#ddd;font-size:13px;outline:none;cursor:pointer">
-        <option value="us-east-1">us-east-1 — US East (N. Virginia)</option>
-        <option value="us-east-2">us-east-2 — US East (Ohio)</option>
-        <option value="us-west-1">us-west-1 — US West (N. California)</option>
-        <option value="us-west-2">us-west-2 — US West (Oregon)</option>
-        <option value="eu-west-1">eu-west-1 — Europe (Ireland)</option>
-        <option value="eu-central-1">eu-central-1 — Europe (Frankfurt)</option>
-        <option value="ap-south-1">ap-south-1 — Asia Pacific (Mumbai)</option>
-        <option value="ap-southeast-1">ap-southeast-1 — Asia Pacific (Singapore)</option>
-        <option value="ap-southeast-2">ap-southeast-2 — Asia Pacific (Sydney)</option>
-        <option value="ap-northeast-1">ap-northeast-1 — Asia Pacific (Tokyo)</option>
-        <option value="sa-east-1">sa-east-1 — South America (São Paulo)</option>
-        <option value="ca-central-1">ca-central-1 — Canada (Central)</option>
-        <option value="me-south-1">me-south-1 — Middle East (Bahrain)</option>
-      </select>
+
+    <!-- Domain Tab -->
+    <div id="vpanel-domain" style="display:none">
+      <div style="margin-bottom:10px"><label class="vault-lbl">Default Domain Name</label><input id="v-dm-name" type="text" placeholder="example.com" class="vault-inp"></div>
+      <div style="font-size:11px;color:#555;margin-bottom:14px">This domain is automatically used in all Terraform deployments. Enter without http:// prefix.</div>
+      <div style="display:flex;gap:8px">
+        <button onclick="saveVaultService('domain',{domain_name:document.getElementById('v-dm-name').value.replace('https://','').replace('http://','').trim()},'v-dm-msg')" style="flex:1;padding:10px;background:linear-gradient(135deg,#0e7490,#0891b2);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">💾 Save Domain</button>
+        <button onclick="deleteVaultService('domain','v-dm-msg')" style="padding:10px 14px;background:#13131f;border:1px solid #3a1a1a;border-radius:8px;color:#f87171;font-size:13px;cursor:pointer">✕ Clear</button>
+      </div>
+      <div id="v-dm-msg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:7px;font-size:12px"></div>
     </div>
-    <div style="display:flex;gap:10px">
-      <button onclick="saveAwsCreds()" style="flex:1;padding:11px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">
-        💾 Save Credentials
-      </button>
-      <button onclick="testAwsCreds()" id="settings-test-btn" style="padding:11px 18px;background:#13131f;border:1px solid #2a2a40;border-radius:8px;color:#a78bfa;font-size:13px;cursor:pointer">
-        🔗 Test
-      </button>
+
+    <!-- Anthropic Tab -->
+    <div id="vpanel-anthropic" style="display:none">
+      <div style="margin-bottom:16px"><label class="vault-lbl">Anthropic API Key</label><input id="v-an-key" type="password" placeholder="sk-ant-api03-..." class="vault-inp"></div>
+      <div style="font-size:11px;color:#555;margin-bottom:14px">Get your key at: <a href="https://console.anthropic.com/account/keys" target="_blank" style="color:#c4b5fd">console.anthropic.com</a></div>
+      <div style="display:flex;gap:8px">
+        <button onclick="saveVaultService('anthropic',{api_key:document.getElementById('v-an-key').value},'v-an-msg')" style="flex:1;padding:10px;background:linear-gradient(135deg,#7c3aed,#6c47ff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">💾 Save API Key</button>
+        <button onclick="deleteVaultService('anthropic','v-an-msg')" style="padding:10px 14px;background:#13131f;border:1px solid #3a1a1a;border-radius:8px;color:#f87171;font-size:13px;cursor:pointer">✕ Clear</button>
+      </div>
+      <div id="v-an-msg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:7px;font-size:12px"></div>
     </div>
-    <div id="settings-msg" style="display:none;margin-top:12px;padding:10px 12px;border-radius:7px;font-size:12px"></div>
-    <div style="margin-top:14px;padding:10px 12px;background:#0a0a14;border-radius:7px;font-size:11px;color:#444;line-height:1.7">
-      Your credentials are stored securely in the server database and never shared.<br>
-      They are used only when you click Deploy or Destroy.
+
+    <div style="margin-top:16px;padding:10px 12px;background:#0a0a14;border-radius:7px;font-size:11px;color:#444;line-height:1.7">
+      🔒 All credentials are stored securely in the database per user account and never shared. They are auto-injected when you Generate, Deploy, or Push to GitHub.
     </div>
   </div>
 </div>

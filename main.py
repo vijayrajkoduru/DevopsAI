@@ -88,6 +88,16 @@ def init_db():
         updated_at TEXT NOT NULL,
         FOREIGN KEY(user_id) REFERENCES users(id)
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS user_credentials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        service TEXT NOT NULL,
+        key_name TEXT NOT NULL,
+        key_value TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(id),
+        UNIQUE(user_id, service, key_name)
+    )''')
     conn.commit()
     conn.close()
 
@@ -1360,6 +1370,10 @@ def deploy_terraform(resource: AWSResource, request: Request):
     domain      = sanitize_tf_var(resource.config.get("domain_name", "")).replace("https://", "").replace("http://", "").strip().rstrip("/")
     user = require_auth(request)
     aws_creds = get_user_aws_creds(user["id"])
+    # Fall back to vault domain if not set on node
+    if not domain:
+        vault_domain = get_service_creds(user["id"], "domain")
+        domain = vault_domain.get("domain_name", "").replace("https://", "").replace("http://", "").strip().rstrip("/")
     logger.info(f"Deploy started by {user['email']} for folder: {folder}")
 
     def run():
@@ -1812,6 +1826,127 @@ def test_aws_credentials(request: Request):
     except Exception as e:
         return {"valid": False, "error": str(e)}
 
+# ── CREDENTIALS VAULT ─────────────────────────────────────────────────────────
+
+def get_user_cred(user_id: int, service: str, key_name: str) -> str:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT key_value FROM user_credentials WHERE user_id=? AND service=? AND key_name=?",
+              (user_id, service, key_name))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else ""
+
+def get_service_creds(user_id: int, service: str) -> dict:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT key_name, key_value FROM user_credentials WHERE user_id=? AND service=?",
+              (user_id, service))
+    rows = c.fetchall()
+    conn.close()
+    return {r[0]: r[1] for r in rows}
+
+def save_user_cred(user_id: int, service: str, key_name: str, key_value: str):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    now = datetime.now().isoformat()
+    c.execute('''INSERT INTO user_credentials (user_id, service, key_name, key_value, updated_at)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT(user_id, service, key_name) DO UPDATE SET key_value=excluded.key_value, updated_at=excluded.updated_at''',
+              (user_id, service, key_name, key_value, now))
+    conn.commit()
+    conn.close()
+
+class VaultSaveRequest(BaseModel):
+    service: str
+    creds: dict
+
+@app.post("/vault/save")
+def vault_save(req: VaultSaveRequest, request: Request):
+    user = require_auth(request)
+    for key_name, key_value in req.creds.items():
+        if key_value:
+            save_user_cred(user["id"], req.service, key_name, key_value)
+    return {"saved": True, "service": req.service}
+
+@app.get("/vault/{service}")
+def vault_get(service: str, request: Request):
+    user = require_auth(request)
+    creds = get_service_creds(user["id"], service)
+    masked = {}
+    for k, v in creds.items():
+        if v and len(v) > 6:
+            masked[k] = v[:4] + "****" + v[-2:]
+        elif v:
+            masked[k] = "****"
+        else:
+            masked[k] = ""
+    return {"service": service, "creds": masked, "configured": bool(creds)}
+
+@app.delete("/vault/{service}")
+def vault_delete(service: str, request: Request):
+    user = require_auth(request)
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM user_credentials WHERE user_id=? AND service=?", (user["id"], service))
+    conn.commit()
+    conn.close()
+    return {"deleted": True, "service": service}
+
+@app.post("/vault/test/github")
+def vault_test_github(request: Request):
+    user = require_auth(request)
+    creds = get_service_creds(user["id"], "github")
+    token = creds.get("token", "") or os.getenv("GITHUB_TOKEN", "")
+    if not token:
+        return {"valid": False, "error": "No GitHub token configured"}
+    try:
+        import urllib.request as urlreq
+        req2 = urlreq.Request("https://api.github.com/user")
+        req2.add_header("Authorization", f"token {token}")
+        req2.add_header("User-Agent", "DevopsAI")
+        with urlreq.urlopen(req2, timeout=8) as resp:
+            data = json.loads(resp.read())
+            return {"valid": True, "username": data.get("login"), "name": data.get("name")}
+    except Exception as e:
+        return {"valid": False, "error": str(e)}
+
+@app.post("/vault/test/docker")
+def vault_test_docker(request: Request):
+    user = require_auth(request)
+    creds = get_service_creds(user["id"], "docker")
+    username = creds.get("username", "") or os.getenv("DOCKER_USERNAME", "")
+    password = creds.get("password", "") or os.getenv("DOCKER_PASSWORD", "")
+    if not username or not password:
+        return {"valid": False, "error": "No Docker credentials configured"}
+    try:
+        import urllib.request as urlreq, base64
+        token = base64.b64encode(f"{username}:{password}".encode()).decode()
+        req2 = urlreq.Request("https://hub.docker.com/v2/users/login",
+                              data=json.dumps({"username": username, "password": password}).encode())
+        req2.add_header("Content-Type", "application/json")
+        with urlreq.urlopen(req2, timeout=8) as resp:
+            return {"valid": True, "username": username}
+    except Exception as e:
+        return {"valid": False, "error": str(e)}
+
+@app.get("/vault/all/status")
+def vault_all_status(request: Request):
+    user = require_auth(request)
+    uid = user["id"]
+    aws = get_user_aws_creds(uid)
+    github = get_service_creds(uid, "github")
+    docker = get_service_creds(uid, "docker")
+    domain = get_service_creds(uid, "domain")
+    anthropic = get_service_creds(uid, "anthropic")
+    return {
+        "aws":       bool(aws),
+        "github":    bool(github.get("token")),
+        "docker":    bool(docker.get("username") and docker.get("password")),
+        "domain":    bool(domain.get("domain_name")),
+        "anthropic": bool(anthropic.get("api_key"))
+    }
+
 # ── GITHUB PUSH ───────────────────────────────────────────────────────────────
 
 class GitHubPushRequest(BaseModel):
@@ -1821,12 +1956,14 @@ class GitHubPushRequest(BaseModel):
     canvas_data: str = ""
 
 @app.post("/github/push")
-def github_push(req: GitHubPushRequest):
-    github_token    = os.getenv("GITHUB_TOKEN", "")
-    github_username = os.getenv("GITHUB_USERNAME", "")
+def github_push(req: GitHubPushRequest, request: Request):
+    user = get_current_user(request)
+    vault_gh = get_service_creds(user["id"], "github") if user else {}
+    github_token    = vault_gh.get("token") or os.getenv("GITHUB_TOKEN", "")
+    github_username = vault_gh.get("username") or os.getenv("GITHUB_USERNAME", "")
 
     if not github_token:
-        raise HTTPException(status_code=400, detail="GITHUB_TOKEN must be set in .env file. Get it from github.com → Settings → Developer Settings → Personal Access Tokens")
+        raise HTTPException(status_code=400, detail="GitHub token not configured. Go to Credentials Vault → GitHub tab to add your token.")
 
     # Accept full GitHub URL or just repo name
     # e.g. https://github.com/vijayrajkoduru/DevopsAI.git  OR  DevopsAI
