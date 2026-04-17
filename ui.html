@@ -68,6 +68,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
 #svg-lines{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:visible}
 .canvas-nodes{position:absolute;top:0;left:0;width:100%;height:100%;z-index:2}
 .vpc-container{position:absolute;border:2px dashed #f59e0b;border-radius:14px;background:rgba(245,158,11,0.03);z-index:1;min-width:280px;min-height:180px}
+.grp-container{position:absolute;border-radius:12px;z-index:0;min-width:240px;min-height:160px;box-sizing:border-box}
 .vpc-header{display:flex;align-items:center;gap:7px;padding:7px 11px;background:rgba(245,158,11,0.08);border-radius:12px 12px 0 0;border-bottom:1px dashed rgba(245,158,11,0.25);cursor:move}
 .vpc-title{font-size:11px;font-weight:700;color:#f59e0b;flex:1}
 .vpc-cidr{font-size:9px;color:#854d0e;background:rgba(245,158,11,0.12);padding:1px 5px;border-radius:4px}
@@ -338,6 +339,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
       <button class="tbb green" onclick="toggleScanner()">☁ Live AWS</button>
       <button class="tbb" onclick="addVPC()">🌐 Add VPC</button>
       <button class="tbb amber" onclick="addAZ()">☕ Add AZ</button>
+      <button class="tbb" onclick="showAddGroupForm()" style="background:linear-gradient(135deg,#1a1a2e,#2a1a3e);border-color:#4a3a6e;color:#c4b5fd">＋ Add Group</button>
       <button class="tbb red" onclick="clearCanvas()">🗑 Clear</button>
       <div class="tb-sep"></div>
       <button class="tbb" onclick="zoomOut()" title="Zoom out">−</button>
@@ -1301,6 +1303,17 @@ function onDragEnd(e){
 function cleanDrag(){dragging=null;ghost.style.display="none";document.removeEventListener("mousemove",onDragMove);document.removeEventListener("mouseup",onDragEnd);}
 // ── VPC & AZ ──────────────────────────────────────────────────────────────────
 var vpcs={},azs={},vc=0,ac=0,vpcConns=[],vpcConnFrom=null;
+var groups={},gc=0;
+var GROUP_COLORS=[
+  {name:"Red",    border:"#ef4444",bg:"rgba(239,68,68,0.06)",   text:"#ef4444"},
+  {name:"Green",  border:"#4ade80",bg:"rgba(74,222,128,0.06)",  text:"#4ade80"},
+  {name:"Blue",   border:"#60a5fa",bg:"rgba(96,165,250,0.06)",  text:"#60a5fa"},
+  {name:"Yellow", border:"#fbbf24",bg:"rgba(251,191,36,0.06)",  text:"#fbbf24"},
+  {name:"Purple", border:"#a78bfa",bg:"rgba(167,139,250,0.06)", text:"#a78bfa"},
+  {name:"Cyan",   border:"#22d3ee",bg:"rgba(34,211,238,0.06)",  text:"#22d3ee"},
+  {name:"Pink",   border:"#f472b6",bg:"rgba(244,114,182,0.06)", text:"#f472b6"},
+  {name:"Orange", border:"#fb923c",bg:"rgba(251,146,60,0.06)",  text:"#fb923c"},
+];
 function addVPC(){
   var id="vpc"+(++vc);
   var x=80+Math.random()*150,y=80+Math.random()*100;
@@ -1364,6 +1377,84 @@ function vpcClicked(id){
   vpcConnFrom=null;
   drawLines();
   showVPCPeeringForm(fId,tId);
+}
+function showAddGroupForm(){
+  var existing=document.getElementById("add-group-overlay");if(existing)existing.remove();
+  var swatches=GROUP_COLORS.map(function(c,i){
+    return '<div onclick="document.querySelectorAll(\'.gc-swatch\').forEach(function(s){s.style.outline=\'\'});this.style.outline=\'2px solid #fff\';document.getElementById(\'gc-sel\').value=\''+i+'\'" class="gc-swatch" style="width:22px;height:22px;border-radius:50%;background:'+c.border+';cursor:pointer;flex-shrink:0;transition:outline 0.1s" title="'+c.name+'"></div>';
+  }).join("");
+  var overlay=document.createElement("div");
+  overlay.id="add-group-overlay";
+  overlay.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center";
+  overlay.innerHTML='<div style="background:#0f0f1a;border:1px solid #2a2a40;border-radius:14px;padding:26px;width:360px;max-width:95vw">'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px"><span style="font-size:18px">🗂</span><span style="font-size:15px;font-weight:700;color:#fff">Add Group / Zone</span><span onclick="document.getElementById(\'add-group-overlay\').remove()" style="margin-left:auto;cursor:pointer;color:#555;font-size:18px">✕</span></div>'
+    +'<div style="margin-bottom:14px"><label style="font-size:10px;color:#666;display:block;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Group Name</label>'
+    +'<input id="gc-name" type="text" placeholder="e.g. Org A, Shared Services, Team Backend" style="width:100%;background:#060610;border:1px solid #1e1e30;border-radius:7px;padding:9px 12px;color:#ddd;font-size:13px;outline:none;box-sizing:border-box"></div>'
+    +'<div style="margin-bottom:20px"><label style="font-size:10px;color:#666;display:block;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Color</label>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'+swatches+'</div>'
+    +'<input type="hidden" id="gc-sel" value="0"></div>'
+    +'<button onclick="addGroup()" style="width:100%;padding:11px;background:linear-gradient(135deg,#4a3a6e,#6c47ff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">＋ Create Group</button>'
+    +'</div>';
+  document.body.appendChild(overlay);
+  // pre-select first swatch
+  setTimeout(function(){var s=document.querySelectorAll(".gc-swatch");if(s[0])s[0].style.outline="2px solid #fff";},50);
+}
+function addGroup(){
+  var name=document.getElementById("gc-name").value.trim()||"Group "+(gc+1);
+  var ci=parseInt(document.getElementById("gc-sel").value)||0;
+  var col=GROUP_COLORS[ci]||GROUP_COLORS[0];
+  var id="grp"+(++gc);
+  var x=80+Math.random()*120, y=80+Math.random()*80;
+  groups[id]={id:id,x:x,y:y,w:320,h:220,name:name,color:ci};
+  document.getElementById("add-group-overlay").remove();
+  renderGroup(id);
+  document.getElementById("hint").style.display="none";
+}
+function renderGroup(id){
+  var g=groups[id];
+  var col=GROUP_COLORS[g.color]||GROUP_COLORS[0];
+  var old=document.getElementById(id);if(old)old.remove();
+  var div=document.createElement("div");
+  div.className="grp-container";div.id=id;
+  div.style.cssText="left:"+g.x+"px;top:"+g.y+"px;width:"+g.w+"px;height:"+g.h+"px;border:2px dashed "+col.border+";background:"+col.bg;
+  // Header
+  var hdr=document.createElement("div");
+  hdr.style.cssText="display:flex;align-items:center;gap:7px;padding:7px 11px;background:"+col.bg+";border-bottom:1px dashed "+col.border+"33;border-radius:10px 10px 0 0;cursor:move;user-select:none";
+  hdr.innerHTML='<div style="width:10px;height:10px;border-radius:50%;background:'+col.border+';flex-shrink:0"></div>'
+    +'<span style="font-size:12px;font-weight:700;color:'+col.text+';flex:1">'+g.name+'</span>'
+    +'<span onclick="event.stopPropagation();renameGroup(\''+id+'\')" style="cursor:pointer;color:'+col.border+';font-size:11px;opacity:0.6;padding:0 4px" title="Rename" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">✎</span>'
+    +'<span onclick="delGroup(\''+id+'\')" style="cursor:pointer;color:#555;font-size:11px;padding:0 2px" onmouseover="this.style.color=\'#f87171\'" onmouseout="this.style.color=\'#555\'">✕</span>';
+  div.appendChild(hdr);
+  // Drag
+  var gDrag=null;
+  hdr.addEventListener("mousedown",function(e){
+    if(e.target.tagName==="SPAN"&&(e.target.title==="Rename"||e.target.innerText==="✕"))return;
+    e.preventDefault();
+    gDrag={ox:e.clientX-g.x,oy:e.clientY-g.y};
+    document.addEventListener("mousemove",onGM);document.addEventListener("mouseup",onGU);
+  });
+  function onGM(e){if(!gDrag)return;g.x=e.clientX-gDrag.ox;g.y=e.clientY-gDrag.oy;div.style.left=g.x+"px";div.style.top=g.y+"px";}
+  function onGU(){gDrag=null;document.removeEventListener("mousemove",onGM);document.removeEventListener("mouseup",onGU);}
+  // Resize handle
+  var rh=document.createElement("div");
+  rh.style.cssText="position:absolute;bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;font-size:8px;color:"+col.border+";opacity:0.5";
+  rh.innerHTML="⤡";
+  var rDrag=null;
+  rh.addEventListener("mousedown",function(e){
+    e.preventDefault();e.stopPropagation();
+    rDrag={ox:e.clientX,oy:e.clientY,ow:g.w,oh:g.h};
+    document.addEventListener("mousemove",onGR);document.addEventListener("mouseup",onGRU);
+  });
+  function onGR(e){if(!rDrag)return;g.w=Math.max(200,rDrag.ow+(e.clientX-rDrag.ox));g.h=Math.max(140,rDrag.oh+(e.clientY-rDrag.oy));div.style.width=g.w+"px";div.style.height=g.h+"px";}
+  function onGRU(){rDrag=null;document.removeEventListener("mousemove",onGR);document.removeEventListener("mouseup",onGRU);}
+  div.appendChild(rh);
+  document.getElementById("cnodes").insertBefore(div,document.getElementById("cnodes").firstChild);
+}
+function delGroup(id){var el=document.getElementById(id);if(el)el.remove();delete groups[id];}
+function renameGroup(id){
+  var g=groups[id];if(!g)return;
+  var n=prompt("Rename group:",g.name);
+  if(n&&n.trim()){g.name=n.trim();renderGroup(id);}
 }
 function addAZ(){
   var id="az"+(++ac);
@@ -1866,6 +1957,7 @@ function clearCanvas(){
   var k=Object.keys(nodes);for(var i=0;i<k.length;i++)delete nodes[k[i]];
   var v=Object.keys(vpcs);for(var i=0;i<v.length;i++)delete vpcs[v[i]];
   var a=Object.keys(azs);for(var i=0;i<a.length;i++)delete azs[a[i]];
+  var gr=Object.keys(groups);for(var i=0;i<gr.length;i++)delete groups[gr[i]];
   drawLines();selId=null;
   document.getElementById("hint").style.display="block";
   document.getElementById("rpbody").innerHTML='<div class="empty-st"><div style="font-size:24px;opacity:0.1;margin-bottom:8px">🗺</div><p>Drag a service to the canvas<br>then click it to configure</p></div>';
@@ -1941,7 +2033,7 @@ function getCanvasData(){
   var nodeData={};
   var ids=Object.keys(nodes);
   for(var i=0;i<ids.length;i++){var n=nodes[ids[i]];nodeData[ids[i]]={id:n.id,meta:n.meta,x:n.x,y:n.y,config:n.config,w:n.w,h:n.h};}
-  return JSON.stringify({nodes:nodeData,conns:conns,vpcs:vpcs,azs:azs,nc:nc,vc:vc,ac:ac,vpcConns:vpcConns,savedAt:new Date().toISOString()});
+  return JSON.stringify({nodes:nodeData,conns:conns,vpcs:vpcs,azs:azs,nc:nc,vc:vc,ac:ac,vpcConns:vpcConns,groups:groups,gc:gc,savedAt:new Date().toISOString()});
 }
 async function saveCanvas(){
   var name=document.getElementById("canvas-name").value.trim();
@@ -2003,6 +2095,7 @@ async function loadCanvas(id,name){
     if(saved.nodes){var nk=Object.keys(saved.nodes);for(var i=0;i<nk.length;i++){var nd=saved.nodes[nk[i]];nodes[nk[i]]=nd;createNodeFromSaved(nd);}}
     if(saved.conns){for(var i=0;i<saved.conns.length;i++)conns.push(saved.conns[i]);}
     if(saved.vpcConns){for(var i=0;i<saved.vpcConns.length;i++)vpcConns.push(saved.vpcConns[i]);}
+    if(saved.groups){gc=saved.gc||0;var gk=Object.keys(saved.groups);for(var i=0;i<gk.length;i++){groups[gk[i]]=saved.groups[gk[i]];renderGroup(gk[i]);}}
     currentCanvasId=id;
     document.getElementById("canvas-name").value=name;
     updateSaveInd(name);
@@ -5185,6 +5278,7 @@ async function startGitHubImport() {
         if(saved.nodes){var nk=Object.keys(saved.nodes);for(var i=0;i<nk.length;i++){var nd=saved.nodes[nk[i]];nodes[nk[i]]=nd;createNodeFromSaved(nd);}}
         if(saved.conns){for(var i=0;i<saved.conns.length;i++) conns.push(saved.conns[i]);}
         if(saved.vpcConns){for(var i=0;i<saved.vpcConns.length;i++) vpcConns.push(saved.vpcConns[i]);}
+        if(saved.groups){gc=saved.gc||0;var gk=Object.keys(saved.groups);for(var i=0;i<gk.length;i++){groups[gk[i]]=saved.groups[gk[i]];renderGroup(gk[i]);}}
         drawLines();
         document.getElementById('hint').style.display = Object.keys(nodes).length===0?'block':'none';
         closeGitHubImport();
