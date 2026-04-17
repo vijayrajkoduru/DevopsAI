@@ -48,7 +48,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
 .cat-row:hover{background:#16161f}
 .cat-arr{font-size:9px;color:#555;width:9px;transition:transform 0.2s;flex-shrink:0}
 .cat-arr.open{transform:rotate(90deg)}
-.cat-lbl{font-size:11px;font-weight:700;color:#aaa;flex:1}
+.cat-lbl{font-size:11px;font-weight:700;color:#aaa;flex:1;letter-spacing:0.3px}
 .cat-cnt{font-size:9px;color:#555;background:#1a1a2e;padding:1px 5px;border-radius:8px}
 .cat-body{display:none;background:#0d0d14}
 .cat-body.open{display:block}
@@ -60,10 +60,11 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
 .sub-cnt{font-size:9px;color:#444;background:#1a1a2e;padding:1px 4px;border-radius:5px}
 .sub-body{display:none;background:#0a0a12}
 .sub-body.open{display:block}
-.svc-row{display:flex;align-items:center;gap:5px;padding:3px 9px 3px 32px;cursor:grab;border-left:2px solid transparent;transition:all 0.15s}
-.svc-row:hover{background:#16162a;border-left-color:#6c47ff}
+.svc-row{display:flex;align-items:center;gap:5px;padding:3px 9px 3px 28px;cursor:grab;border-left:2px solid transparent;transition:all 0.15s}
+.svc-row:hover{background:#16162a}
 .svc-lbl{font-size:10px;color:#888;flex:1;pointer-events:none}
 .svc-tag{font-size:8px;color:#555;background:#13131f;padding:1px 3px;border-radius:3px;border:1px solid #1a1a2e;pointer-events:none}
+.cat-row{border-left:3px solid transparent}
 .canvas-area{flex:1;position:relative;overflow:hidden;touch-action:none;padding-top:44px;background:#0d0d18;background-image:radial-gradient(circle,#151525 1px,transparent 1px);background-size:24px 24px}
 #svg-lines{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:visible}
 .canvas-nodes{position:absolute;top:0;left:0;width:100%;height:100%;z-index:2}
@@ -1298,12 +1299,38 @@ function getCompat(g1,g2){
   return{ok:true,desc:"These services can be connected."};
 }
 // ── TREE RENDER ───────────────────────────────────────────────────────────────
+// ── SIDEBAR COLOR SYSTEM ──────────────────────────────────────────────────────
+var _CAT_COLORS={
+  aws:"#FF9900",    // AWS orange
+  devops:"#a78bfa"  // DevOps purple
+};
+var _GRP_COLORS={
+  compute:"#FF6B2B",serverless:"#FF9900",container:"#2496ED",k8s:"#326CE5",
+  storage:"#3F8624", database:"#2965CC",cache:"#DC382D",
+  network:"#8C4FFF", api:"#06b6d4",
+  security:"#DD344C",secrets:"#fbbf24",
+  monitoring:"#E6522C",
+  messaging:"#FF4F8B",streaming:"#7c3aed",
+  cicd:"#60a5fa",gitops:"#EF7B4D",
+  iac:"#9333ea",cfgmgmt:"#ef4444",
+  registry:"#f97316",webserver:"#22c55e",
+  default:"#6c47ff"
+};
+function _grpColor(grp){return _GRP_COLORS[grp]||_GRP_COLORS.default;}
+function _grpBg(grp){
+  var c=_grpColor(grp);
+  // convert hex to rgba with low opacity for row bg tint
+  var r=parseInt(c.slice(1,3),16),g=parseInt(c.slice(3,5),16),b=parseInt(c.slice(5,7),16);
+  return "rgba("+r+","+g+","+b+",0.06)";
+}
+
 function renderTree(filter){
   filter=(filter||"").toLowerCase();
   var root=document.getElementById("tree");
   root.innerHTML="";
   for(var ci=0;ci<TREE.length;ci++){
     var cat=TREE[ci];
+    var catColor=_CAT_COLORS[cat.cat]||"#888";
     var filtSubs=[];
     for(var si=0;si<cat.subs.length;si++){
       var sub=cat.subs[si];
@@ -1317,7 +1344,12 @@ function renderTree(filter){
     catDiv.className="cat-wrap";
     var catRow=document.createElement("div");
     catRow.className="cat-row";
-    catRow.innerHTML='<span class="cat-arr'+(open?" open":"")+'" id="ca'+ci+'">▶</span><span class="cat-lbl">'+cat.name+'</span><span class="cat-cnt">'+total+'</span>';
+    catRow.style.borderLeftColor=catColor;
+    catRow.style.borderLeftWidth="3px";
+    catRow.style.borderLeftStyle="solid";
+    catRow.innerHTML='<span class="cat-arr'+(open?" open":"")+'" id="ca'+ci+'">▶</span>'
+      +'<span class="cat-lbl" style="color:'+catColor+'">'+cat.name+'</span>'
+      +'<span class="cat-cnt" style="background:rgba('+_hexToRgb(catColor)+',0.15);color:'+catColor+';border:1px solid rgba('+_hexToRgb(catColor)+',0.25)">'+total+'</span>';
     (function(idx){catRow.onclick=function(){toggleCat(idx);};})(ci);
     var catBody=document.createElement("div");
     catBody.className="cat-body"+(open?" open":"");
@@ -1330,7 +1362,9 @@ function renderTree(filter){
       var subRow=document.createElement("div");
       subRow.className="sub-row";
       var subId="sb"+ci+"_"+fi;
-      subRow.innerHTML='<span class="sub-arr'+(open?" open":"")+'" id="sa'+ci+"_"+fi+'">▶</span><span class="sub-lbl">'+sub.name+'</span><span class="sub-cnt">'+svcs.length+'</span>';
+      subRow.innerHTML='<span class="sub-arr'+(open?" open":"")+'" id="sa'+ci+"_"+fi+'">▶</span>'
+        +'<span class="sub-lbl" style="color:rgba('+_hexToRgb(catColor)+',0.7)">'+sub.name+'</span>'
+        +'<span class="sub-cnt">'+svcs.length+'</span>';
       (function(c,f){subRow.onclick=function(){toggleSub(c,f);};})(ci,fi);
       var subBody=document.createElement("div");
       subBody.className="sub-body"+(open?" open":"");
@@ -1339,20 +1373,29 @@ function renderTree(filter){
       subDiv.appendChild(subBody);
       for(var vi=0;vi<svcs.length;vi++){
         (function(svc,catName,subName,catType){
+          var grpCol=_grpColor(svc.grp);
           var item=document.createElement("div");
           item.className="svc-row";
+          item.style.borderLeftColor=grpCol;
+          item.style.borderLeftWidth="2px";
+          item.style.borderLeftStyle="solid";
           var icoWrap=document.createElement("div");
           icoWrap.style.cssText="width:18px;height:18px;border-radius:4px;flex-shrink:0;overflow:hidden";
           icoWrap.appendChild(makeIcoEl(svc.id,18));
           item.appendChild(icoWrap);
           var lbl=document.createElement("span");
           lbl.className="svc-lbl";
-          if(filter&&filter.length>0){var fi=svc.n.toLowerCase().indexOf(filter.toLowerCase());if(fi>=0){lbl.innerHTML=svc.n.slice(0,fi)+'<mark>'+svc.n.slice(fi,fi+filter.length)+'</mark>'+svc.n.slice(fi+filter.length);}else{lbl.textContent=svc.n;}}else{lbl.textContent=svc.n;}
+          lbl.style.color=grpCol;
+          if(filter&&filter.length>0){var fi2=svc.n.toLowerCase().indexOf(filter.toLowerCase());if(fi2>=0){lbl.innerHTML=svc.n.slice(0,fi2)+'<mark>'+svc.n.slice(fi2,fi2+filter.length)+'</mark>'+svc.n.slice(fi2+filter.length);}else{lbl.textContent=svc.n;}}else{lbl.textContent=svc.n;}
           item.appendChild(lbl);
           var tag=document.createElement("span");
           tag.className="svc-tag";
+          tag.style.cssText="color:"+grpCol+";border-color:rgba("+_hexToRgb(grpCol)+",0.25);background:rgba("+_hexToRgb(grpCol)+",0.08)";
           tag.textContent=svc.tag;
           item.appendChild(tag);
+          // hover highlight
+          item.addEventListener("mouseover",function(){this.style.background=_grpBg(svc.grp);});
+          item.addEventListener("mouseout",function(){this.style.background="";});
           item.addEventListener("mousedown",function(e){
             e.preventDefault();
             startDrag(e,{id:svc.id,label:svc.n,catName:catName,subName:subName,group:svc.grp,catType:catType});
@@ -1364,6 +1407,11 @@ function renderTree(filter){
     }
     root.appendChild(catDiv);
   }
+}
+function _hexToRgb(hex){
+  hex=hex.replace('#','');
+  if(hex.length===3)hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  return parseInt(hex.slice(0,2),16)+","+parseInt(hex.slice(2,4),16)+","+parseInt(hex.slice(4,6),16);
 }
 function toggleCat(ci){var b=document.getElementById("cb"+ci),a=document.getElementById("ca"+ci);if(b){b.classList.toggle("open");a.classList.toggle("open");}}
 function toggleSub(ci,fi){var b=document.getElementById("sb"+ci+"_"+fi),a=document.getElementById("sa"+ci+"_"+fi);if(b){b.classList.toggle("open");a.classList.toggle("open");}}
