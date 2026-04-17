@@ -352,6 +352,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
       <button class="tbb amber" onclick="addAZ()">☕ Add AZ</button>
       <button class="tbb" onclick="showAddGroupForm()" style="background:linear-gradient(135deg,#1a1a2e,#2a1a3e);border-color:#4a3a6e;color:#c4b5fd">＋ Add Group</button>
       <button class="tbb red" onclick="clearCanvas()">🗑 Clear</button>
+      <button class="tbb" onclick="cleanAllDupes()" title="Remove duplicate nodes, keep most connected" style="background:#0d1a1a;border-color:#0891b2;color:#22d3ee">⟳ Clean Dupes</button>
       <div class="tb-sep"></div>
       <button class="tbb" onclick="zoomOut()" title="Zoom out">−</button>
       <span class="zl" id="zoom-label">100%</span>
@@ -2440,6 +2441,37 @@ function validateArchitecture(){
   if(groups_by_type.database&&!groups_by_type.cache)
     suggestions.push({icon:"💡",title:"No caching layer",fix:"Add Redis/ElastiCache to reduce database load and improve response time.",add:[{id:"elasticache_redis",n:"Redis"},{id:"elasticache_memcached",n:"Memcached"}]});
 
+  // ── DUPLICATE NODE DETECTION ──
+  var svcGroups={};
+  nodeList.forEach(function(n){
+    var key=n.meta.id;
+    if(!svcGroups[key])svcGroups[key]=[];
+    svcGroups[key].push(n);
+  });
+  Object.keys(svcGroups).forEach(function(key){
+    var dupes=svcGroups[key];
+    if(dupes.length<2)return;
+    // Sort: most connections first = "primary"
+    dupes.sort(function(a,b){
+      var ac=conns.filter(function(c){return c.f===a.id||c.t===a.id;}).length;
+      var bc=conns.filter(function(c){return c.f===b.id||c.t===b.id;}).length;
+      return bc-ac;
+    });
+    var primary=dupes[0];
+    var extras=dupes.slice(1);
+    extras.forEach(function(dup){
+      var mergeList='[\''+primary.id+'\',\''+dup.id+'\']';
+      warnings.push({
+        icon:"⚠️",
+        title:"Duplicate: "+dup.meta.label+" (×"+dupes.length+")",
+        fix:"You have "+dupes.length+" copies of "+dup.meta.label+". Keep the most-connected one and merge or remove the rest.",
+        nodeId:dup.id,
+        mergeInto:primary.id,
+        isDuplicate:true
+      });
+    });
+  });
+
   // ── DEDUPLICATE: collapse same-title items into one (e.g. 3× Prometheus) ──
   function dedup(arr){
     var seen={};
@@ -2511,8 +2543,19 @@ function validateArchitecture(){
         actionBtns+='</div>';
       }
 
-      // Remove button for node-specific items
-      if(item.nodeId){
+      // Duplicate: Merge + Remove buttons
+      if(item.isDuplicate && item.mergeInto && item.nodeId){
+        actionBtns+='<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">'
+          +'<span style="font-size:9px;color:#555;width:100%;margin-bottom:2px;letter-spacing:.5px">RESOLVE DUPLICATE</span>'
+          +'<button onclick="mergeNodes(\''+item.mergeInto+'\',\''+item.nodeId+'\')" '
+          +'style="background:#0d1a1a;'+btnStyle+'#0891b2;color:#22d3ee" '
+          +'onmouseover="this.style.background=\'#0d2a2a\'" onmouseout="this.style.background=\'#0d1a1a\'">⟳ Merge into primary</button>'
+          +'<button onclick="removeNodeFromValidator(\''+item.nodeId+'\')" '
+          +'style="background:transparent;'+btnStyle+'#3f1a1a;color:#f87171" '
+          +'onmouseover="this.style.background=\'#2a0f0f\'" onmouseout="this.style.background=\'transparent\'">🗑 Remove this copy</button>'
+          +'</div>';
+      } else if(item.nodeId){
+        // Regular remove button
         actionBtns+='<div style="margin-top:6px">'
           +'<button onclick="removeNodeFromValidator(\''+item.nodeId+'\')" '
           +'style="background:transparent;'+btnStyle+'#3f1a1a;color:#f87171;font-size:9px;padding:2px 8px;cursor:pointer" '
@@ -2520,7 +2563,8 @@ function validateArchitecture(){
           +'</div>';
       }
 
-      return '<div style="background:#0a0a18;border:1px solid #1e1e30;border-radius:8px;padding:10px 12px;margin-bottom:8px">'
+      var borderCol=item.isDuplicate?'#1a2a2a':'#1e1e30';
+      return '<div style="background:#0a0a18;border:1px solid '+borderCol+';border-radius:8px;padding:10px 12px;margin-bottom:8px">'
         +'<div style="font-size:12px;font-weight:700;color:#ddd;margin-bottom:4px">'+item.icon+' '+item.title+'</div>'
         +'<div style="font-size:11px;color:#888;line-height:1.5">💬 '+item.fix+'</div>'
         +actionBtns
@@ -2629,8 +2673,71 @@ function removeNodeFromValidator(nid){
   var el=document.getElementById(nid);if(el)el.remove();
   delete nodes[nid];
   if(selId===nid){selId=null;document.getElementById("props").style.display="none";}
-  drawLines();
+  drawLines();updateReadiness();
   showNotif("ok","Removed",label+" removed from canvas.","",2000);
+  validateArchitecture();
+}
+
+function mergeNodes(keepId, removeId){
+  if(!nodes[keepId]||!nodes[removeId])return;
+  var keepLabel=nodes[keepId].meta.label;
+  var removeLabel=nodes[removeId].meta.label;
+  // Transfer all connections from removeId to keepId
+  var transferred=0;
+  conns.forEach(function(c){
+    if(c.f===removeId){
+      var already=conns.some(function(x){return (x.f===keepId&&x.t===c.t)||(x.t===keepId&&x.f===c.t);});
+      if(!already&&c.t!==keepId){c.f=keepId;transferred++;}
+    }
+    if(c.t===removeId){
+      var already=conns.some(function(x){return (x.f===keepId&&x.t===c.f)||(x.t===keepId&&x.f===c.f);});
+      if(!already&&c.f!==keepId){c.t=keepId;transferred++;}
+    }
+  });
+  // Remove self-loops created by the merge
+  conns=conns.filter(function(c){return c.f!==c.t&&c.f!==removeId&&c.t!==removeId;});
+  var el=document.getElementById(removeId);if(el)el.remove();
+  delete nodes[removeId];
+  if(selId===removeId){selId=keepId;selectNode(keepId);}
+  drawLines();updateReadiness();
+  showNotif("ok","Merged!",removeLabel+" merged into "+keepLabel+". "+transferred+" connections transferred.","",3500);
+  validateArchitecture();
+}
+
+function cleanAllDupes(){
+  var svcMap={};
+  Object.keys(nodes).forEach(function(nid){
+    var key=nodes[nid].meta.id;
+    if(!svcMap[key])svcMap[key]=[];
+    svcMap[key].push(nid);
+  });
+  var merged=0;
+  Object.keys(svcMap).forEach(function(key){
+    var ids=svcMap[key];
+    if(ids.length<2)return;
+    // Sort by connection count descending — keep most connected
+    ids.sort(function(a,b){
+      var ac=conns.filter(function(c){return c.f===a||c.t===a;}).length;
+      var bc=conns.filter(function(c){return c.f===b||c.t===b;}).length;
+      return bc-ac;
+    });
+    var keepId=ids[0];
+    ids.slice(1).forEach(function(removeId){
+      if(!nodes[removeId])return;
+      conns.forEach(function(c){
+        if(c.f===removeId&&c.t!==keepId)c.f=keepId;
+        if(c.t===removeId&&c.f!==keepId)c.t=keepId;
+      });
+      conns=conns.filter(function(c){return c.f!==c.t&&c.f!==removeId&&c.t!==removeId;});
+      var el=document.getElementById(removeId);if(el)el.remove();
+      delete nodes[removeId];
+      merged++;
+    });
+  });
+  if(selId&&!nodes[selId]){selId=null;document.getElementById("props").style.display="none";}
+  drawLines();updateReadiness();
+  if(merged>0)showNotif("ok","Cleaned!",merged+" duplicate node(s) merged and removed.","Connections transferred to primary nodes.",4000);
+  else showNotif("info","No Duplicates","No duplicate services found on canvas.","",3000);
   validateArchitecture();
 }
 async function genAll(){
