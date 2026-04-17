@@ -2467,24 +2467,26 @@ function switchVaultTab(tab) {
 async function saveVaultService(service, creds, msgId) {
   var msg = document.getElementById(msgId);
   msg.style.display = 'none';
-  var entries = Object.entries(creds).filter(function(e){ return e[1] && e[1].trim(); });
-  if (!entries.length) {
+  var filtered = {};
+  Object.entries(creds).forEach(function(e){ if(e[1] && e[1].trim()) filtered[e[0]] = e[1].trim(); });
+  if (!Object.keys(filtered).length) {
     msg.style.display='block'; msg.style.background='#2a0a0a'; msg.style.color='#f87171';
     msg.textContent = 'Please fill in at least one field.'; return;
   }
   try {
-    for (var i=0; i<entries.length; i++) {
-      var r = await fetch('/vault/save', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({service: service, key_name: entries[i][0], key_value: entries[i][1].trim()})});
-      var d = await r.json();
-      if (!d.saved) throw new Error(d.detail||'Save failed');
+    var r = await fetch('/vault/save', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({service: service, creds: filtered})});
+    var d = await r.json();
+    if (!d.saved) {
+      var errMsg = typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail) || 'Save failed';
+      throw new Error(errMsg);
     }
     msg.style.display='block'; msg.style.background='#0a2a0a'; msg.style.color='#4ade80';
     msg.textContent = '✔ '+service.charAt(0).toUpperCase()+service.slice(1)+' credentials saved!';
     loadVaultStatus();
   } catch(e) {
     msg.style.display='block'; msg.style.background='#2a0a0a'; msg.style.color='#f87171';
-    msg.textContent = '✗ '+e.message;
+    msg.textContent = '✗ '+(e.message||'Unknown error');
   }
 }
 
