@@ -6,18 +6,20 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;height:100vh;overflow:hidden;display:flex;flex-direction:column;user-select:none}
-.topbar{background:#0f0f1a;border-bottom:1px solid #1a1a2e;padding:0 16px;height:50px;display:flex;align-items:center;gap:8px;flex-shrink:0}
-.logo{display:flex;align-items:center;gap:8px;margin-right:10px}
-.logo-box{width:28px;height:28px;background:linear-gradient(135deg,#6c47ff,#a78bfa);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px}
-.logo-txt{font-size:14px;font-weight:700;color:#fff}
-.nav-tab{padding:5px 12px;border-radius:6px;cursor:pointer;font-size:11px;color:#666;border:1px solid transparent;transition:all 0.2s}
-.nav-tab:hover{color:#ccc;background:#1a1a2e}
-.nav-tab.active{background:#1a1a2e;color:#a78bfa;border-color:#3d3a6e}
-.topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
-.badge{display:flex;align-items:center;gap:4px;font-size:10px;padding:3px 8px;border-radius:20px}
+.topbar{background:linear-gradient(90deg,#0a0a14 0%,#0f0f1a 50%,#0a0a14 100%);border-bottom:1px solid #1e1e35;padding:0 20px;height:54px;display:flex;align-items:center;gap:12px;flex-shrink:0;box-shadow:0 2px 20px rgba(0,0,0,0.4)}
+.logo{display:flex;align-items:center;gap:10px;margin-right:16px;text-decoration:none}
+.logo-box{width:32px;height:32px;background:linear-gradient(135deg,#6c47ff,#a78bfa);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;animation:logo-breathe 3s ease-in-out infinite;flex-shrink:0}
+@keyframes logo-breathe{0%,100%{box-shadow:0 0 6px rgba(108,71,255,0.4),0 0 0px rgba(167,139,250,0.2);transform:scale(1)}50%{box-shadow:0 0 18px rgba(108,71,255,0.8),0 0 32px rgba(167,139,250,0.35);transform:scale(1.06)}}
+.logo-txt{font-size:15px;font-weight:800;background:linear-gradient(135deg,#fff 30%,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-0.3px}
+.logo-sub{font-size:9px;color:#444;letter-spacing:1.5px;text-transform:uppercase;margin-top:-2px;-webkit-text-fill-color:#444}
+.nav-tab{padding:6px 14px;border-radius:7px;cursor:pointer;font-size:11px;font-weight:600;color:#555;border:1px solid transparent;transition:all 0.2s;letter-spacing:0.2px}
+.nav-tab:hover{color:#ccc;background:#161625;border-color:#2a2a40}
+.nav-tab.active{background:#161625;color:#a78bfa;border-color:#3d3a6e;box-shadow:0 0 12px rgba(108,71,255,0.15)}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.badge{display:flex;align-items:center;gap:4px;font-size:10px;padding:4px 10px;border-radius:20px}
 .badge-g{color:#4ade80;background:#0d2d1a;border:1px solid #166534}
-.sdot{width:5px;height:5px;border-radius:50%;background:#4ade80;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+.sdot{width:6px;height:6px;border-radius:50%;background:#4ade80;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(0.8)}}
 .page{display:none;flex:1;overflow:hidden}
 .page.active{display:flex}
 .sidebar{width:235px;min-width:140px;max-width:420px;background:#0f0f1a;border-right:1px solid #1a1a2e;display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;position:relative}
@@ -263,9 +265,16 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
 <div class="ghost" id="ghost"><span id="ghost-ico"></span><span id="ghost-lbl"></span></div>
 <div class="ctx-menu" id="ctx-menu"></div>
 <div class="topbar">
-  <div class="logo"><div class="logo-box">⚡</div><span class="logo-txt">AI DevOps Platform</span></div>
-  <div class="nav-tab active" id="tab-canvas" onclick="showPage('canvas')">🗺 Infrastructure Canvas</div>
-  <div class="nav-tab" id="tab-gen" onclick="showPage('gen')">📄 Code Generator</div>
+  <div class="logo">
+    <div class="logo-box">⚡</div>
+    <div style="display:flex;flex-direction:column;line-height:1.2">
+      <span class="logo-txt">DevopsAI</span>
+      <span class="logo-sub">Cloud Infrastructure</span>
+    </div>
+  </div>
+  <div style="width:1px;height:22px;background:#1e1e35;margin:0 4px"></div>
+  <div class="nav-tab active" id="tab-canvas" onclick="showPage('canvas')">🗺 Canvas</div>
+  <div class="nav-tab" id="tab-gen" onclick="showPage('gen')">📄 Generator</div>
   <div class="topbar-right">
     <div id="agent-status-badge" class="badge badge-g"><div class="sdot"></div>Agent Online</div>
     <div id="save-indicator" style="font-size:10px;color:#444;padding:2px 8px">Not saved</div>
