@@ -772,7 +772,7 @@ def generate_terraform(resource: AWSResource, request: Request):
     config_str = json.dumps(cfg, indent=2)
 
     # Resolve domain name — use node config, or fall back to global canvas domain
-    domain_name = cfg.get("domain_name") or cfg.get("global_domain_name") or "devopsai.com"
+    domain_name = (cfg.get("domain_name") or cfg.get("global_domain_name") or "devopsai.com").replace("https://", "").replace("http://", "").strip().rstrip("/")
     namespace   = cfg.get("namespace") or cfg.get("k8s_namespace") or ""
 
     # Build requirements section from what the user filled in
@@ -926,7 +926,7 @@ def generate_terraform(resource: AWSResource, request: Request):
 def generate_config(resource: AWSResource, request: Request):
     require_auth(request)
     cfg_raw    = resource.config
-    domain_name = cfg_raw.get("domain_name") or cfg_raw.get("global_domain_name") or "devopsai.com"
+    domain_name = (cfg_raw.get("domain_name") or cfg_raw.get("global_domain_name") or "devopsai.com").replace("https://", "").replace("http://", "").strip().rstrip("/")
     namespace   = cfg_raw.get("namespace") or cfg_raw.get("k8s_namespace") or ""
     config_str = json.dumps(cfg_raw, indent=2)
     rt = resource.resource_type
@@ -1357,7 +1357,7 @@ def deploy_terraform(resource: AWSResource, request: Request):
         return {"error": "Folder not found: " + folder}
     environment = sanitize_tf_var(resource.config.get("environment", "dev"))
     region      = sanitize_tf_var(resource.config.get("region", "us-east-1"))
-    domain      = sanitize_tf_var(resource.config.get("domain_name", ""))
+    domain      = sanitize_tf_var(resource.config.get("domain_name", "")).replace("https://", "").replace("http://", "").strip().rstrip("/")
     user = require_auth(request)
     aws_creds = get_user_aws_creds(user["id"])
     logger.info(f"Deploy started by {user['email']} for folder: {folder}")
