@@ -280,8 +280,28 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
           <span>Free Plan</span>
           <a id="upgrade-link" href="/landing#pricing" target="_blank" style="font-size:9px;color:#a78bfa;text-decoration:none;background:rgba(108,71,255,0.15);border:1px solid rgba(108,71,255,0.3);padding:1px 6px;border-radius:8px;display:none">Upgrade ↗</a>
         </div>
-        <div id="aws-creds-status" onclick="openSettings()" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;border-radius:5px;font-size:12px;color:#fbbf24;transition:background 0.15s" onmouseover="this.style.background='#1a1000'" onmouseout="this.style.background='transparent'"><span>⚠️</span> AWS Not Configured</div>
-        <div onclick="openSettings()" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;border-radius:5px;font-size:12px;color:#c4b5fd;transition:background 0.15s" onmouseover="this.style.background='#1a1030'" onmouseout="this.style.background='transparent'">⚙️ Settings</div>
+        <div onclick="openSettings()" style="padding:6px 10px 4px;cursor:pointer;border-radius:5px;transition:background 0.15s" onmouseover="this.style.background='#1a1030'" onmouseout="this.style.background='transparent'">
+          <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">Credentials</div>
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px">
+              <span style="color:#888">☁️ AWS</span><span id="dd-st-aws" style="width:7px;height:7px;border-radius:50%;background:#fbbf24;display:inline-block"></span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px">
+              <span style="color:#888">🐙 GitHub</span><span id="dd-st-github" style="width:7px;height:7px;border-radius:50%;background:#fbbf24;display:inline-block"></span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px">
+              <span style="color:#888">🐳 Docker</span><span id="dd-st-docker" style="width:7px;height:7px;border-radius:50%;background:#fbbf24;display:inline-block"></span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px">
+              <span style="color:#888">🌐 Domain</span><span id="dd-st-domain" style="width:7px;height:7px;border-radius:50%;background:#fbbf24;display:inline-block"></span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px">
+              <span style="color:#888">🤖 Anthropic</span><span id="dd-st-anthropic" style="width:7px;height:7px;border-radius:50%;background:#fbbf24;display:inline-block"></span>
+            </div>
+          </div>
+        </div>
+        <div style="border-top:1px solid #1a1a2e;margin:4px 0"></div>
+        <div onclick="openSettings()" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;border-radius:5px;font-size:12px;color:#c4b5fd;transition:background 0.15s" onmouseover="this.style.background='#1a1030'" onmouseout="this.style.background='transparent'">⚙️ Credentials Vault</div>
         <div onclick="doLogout()" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;border-radius:5px;font-size:12px;color:#f87171;transition:background 0.15s" onmouseover="this.style.background='#1a0a0a'" onmouseout="this.style.background='transparent'">🚪 Logout</div>
       </div>
     </div>
@@ -1974,6 +1994,7 @@ function showPage(n){
 function toggleUserMenu(){
   var dd = document.getElementById('user-dropdown');
   dd.style.display = dd.style.display === 'block' ? 'none' : 'block';
+  if (dd.style.display === 'block') loadVaultStatus();
 }
 document.addEventListener('click', function(e){
   var menu = document.getElementById('user-menu');
@@ -2535,15 +2556,10 @@ async function loadVaultStatus() {
     var d = await r.json();
     ['aws','github','docker','domain','anthropic'].forEach(function(s) {
       var dot = document.getElementById('vst-'+s);
-      if (!dot) return;
-      dot.className = 'vault-status ' + (d[s] ? 'ok' : 'warn');
+      if (dot) dot.className = 'vault-status ' + (d[s] ? 'ok' : 'warn');
+      var ddDot = document.getElementById('dd-st-'+s);
+      if (ddDot) ddDot.style.background = d[s] ? '#4ade80' : '#fbbf24';
     });
-    // also update topbar aws status
-    var credsStatus = document.getElementById('aws-creds-status');
-    if (credsStatus) {
-      if (d.aws) { credsStatus.innerHTML='<span>✅</span> AWS Connected'; credsStatus.style.color='#4ade80'; }
-      else { credsStatus.innerHTML='<span>⚠️</span> AWS Not Configured'; credsStatus.style.color='#fbbf24'; }
-    }
     // pre-fill non-secret vault fields from /vault/{service}
     await loadVaultFields('github', {token:'v-gh-token', username:'v-gh-user'});
     await loadVaultFields('docker', {username:'v-dk-user'});
