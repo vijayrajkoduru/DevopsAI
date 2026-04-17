@@ -352,7 +352,6 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
       <button class="tbb amber" onclick="addAZ()">☕ Add AZ</button>
       <button class="tbb" onclick="showAddGroupForm()" style="background:linear-gradient(135deg,#1a1a2e,#2a1a3e);border-color:#4a3a6e;color:#c4b5fd">＋ Add Group</button>
       <button class="tbb red" onclick="clearCanvas()">🗑 Clear</button>
-      <button class="tbb" onclick="cleanAllDupes()" title="Remove duplicate nodes, keep most connected" style="background:#0d1a1a;border-color:#0891b2;color:#22d3ee">⟳ Clean Dupes</button>
       <div class="tb-sep"></div>
       <button class="tbb" onclick="zoomOut()" title="Zoom out">−</button>
       <span class="zl" id="zoom-label">100%</span>
@@ -1311,32 +1310,55 @@ function onDragEnd(e){
     var cx=(e.clientX-rect.left-panX)/zoom-80;
     var cy=(e.clientY-rect.top-panY)/zoom-40;
     var droppedMeta=dragging;
-    createNode(droppedMeta,cx,cy);
+    // Check if same service type already exists
+    var existing=Object.values(nodes).filter(function(n){return n.meta.id===droppedMeta.id;});
+    if(existing.length>0){
+      var existingNames=existing.map(function(n){return n.config.name||n.meta.label;}).join(", ");
+      showDupeConfirm(droppedMeta,cx,cy,existingNames);
+    } else {
+      dropAndAutoConnect(droppedMeta,cx,cy);
+    }
     document.getElementById("hint").style.display="none";
-    // Auto-connect to compatible nodes already on canvas
-    setTimeout(function(){
-      var newId="n"+nc;
-      if(!nodes[newId])return;
-      var targets=getCompatGroups(droppedMeta);
-      var connected=[];
-      Object.keys(nodes).forEach(function(oid){
-        if(oid===newId)return;
-        var og=(nodes[oid].meta.group||nodes[oid].meta.grp||"").toLowerCase();
-        if(targets.indexOf(og)<0)return;
-        var compat=getCompat(droppedMeta.group||droppedMeta.grp||"",nodes[oid].meta.group||nodes[oid].meta.grp||"");
-        if(!compat.ok)return;
-        var already=conns.some(function(c){return (c.f===newId&&c.t===oid)||(c.t===newId&&c.f===oid);});
-        if(already)return;
-        conns.push({f:newId,t:oid});
-        connected.push(nodes[oid].meta.label);
-      });
-      if(connected.length){
-        drawLines();updateReadiness();
-        showNotif("ok","Auto-connected!",droppedMeta.label+" connected to "+connected.join(", "),"You can adjust connections anytime.",3500);
-      }
-    },80);
   }
   cleanDrag();
+}
+function dropAndAutoConnect(droppedMeta,cx,cy){
+  createNode(droppedMeta,cx,cy);
+  setTimeout(function(){
+    var newId="n"+nc;
+    if(!nodes[newId])return;
+    var targets=getCompatGroups(droppedMeta);
+    var connected=[];
+    Object.keys(nodes).forEach(function(oid){
+      if(oid===newId)return;
+      var og=(nodes[oid].meta.group||nodes[oid].meta.grp||"").toLowerCase();
+      if(targets.indexOf(og)<0)return;
+      var compat=getCompat(droppedMeta.group||droppedMeta.grp||"",nodes[oid].meta.group||nodes[oid].meta.grp||"");
+      if(!compat.ok)return;
+      var already=conns.some(function(c){return (c.f===newId&&c.t===oid)||(c.t===newId&&c.f===oid);});
+      if(already)return;
+      conns.push({f:newId,t:oid});
+      connected.push(nodes[oid].meta.label);
+    });
+    if(connected.length){drawLines();updateReadiness();
+      showNotif("ok","Auto-connected!",droppedMeta.label+" → "+connected.join(", "),"",3000);}
+  },80);
+}
+function showDupeConfirm(meta,cx,cy,existingNames){
+  var old=document.getElementById("dupe-confirm");if(old)old.remove();
+  var d=document.createElement("div");d.id="dupe-confirm";
+  d.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;display:flex;align-items:center;justify-content:center";
+  d.innerHTML='<div style="background:#0d0d1a;border:1px solid #2a2a40;border-radius:14px;padding:28px 32px;max-width:380px;width:90%;text-align:center">'
+    +'<div style="font-size:22px;margin-bottom:10px">⚠️</div>'
+    +'<div style="font-size:14px;font-weight:800;color:#fff;margin-bottom:8px">'+meta.label+' already exists</div>'
+    +'<div style="font-size:11px;color:#666;margin-bottom:20px;line-height:1.6">Already on canvas: <span style="color:#a78bfa">'+existingNames+'</span><br>Do you want to add another one?</div>'
+    +'<div style="display:flex;gap:10px;justify-content:center">'
+    +'<button onclick="document.getElementById(\'dupe-confirm\').remove();dropAndAutoConnect('+JSON.stringify(meta)+','+cx+','+cy+')" '
+    +'style="padding:8px 20px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:700;cursor:pointer">Yes, Add Another</button>'
+    +'<button onclick="document.getElementById(\'dupe-confirm\').remove()" '
+    +'style="padding:8px 20px;background:#1a1a2e;border:1px solid #2a2a40;border-radius:8px;color:#888;font-size:12px;cursor:pointer">Cancel</button>'
+    +'</div></div>';
+  document.body.appendChild(d);
 }
 function cleanDrag(){dragging=null;ghost.style.display="none";document.removeEventListener("mousemove",onDragMove);document.removeEventListener("mouseup",onDragEnd);clearCompatHighlight();}
 
