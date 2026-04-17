@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi import FastAPI, Request, Response, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -6,7 +6,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 import anthropic
-import os, re, json, sqlite3, boto3, subprocess
+import os, re, json, sqlite3, boto3, subprocess, zipfile, io
 import secrets, tempfile, shutil, html, logging
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -98,10 +98,48 @@ def init_db():
         FOREIGN KEY(user_id) REFERENCES users(id),
         UNIQUE(user_id, service, key_name)
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS ai_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        endpoint TEXT NOT NULL DEFAULT 'architect',
+        month TEXT NOT NULL,
+        call_count INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(user_id, endpoint, month),
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )''')
     conn.commit()
     conn.close()
 
 init_db()
+
+# ── PLAN LIMITS ────────────────────────────────────────────────────────────────
+AI_LIMITS = {"free": 3, "pro": 30, "team": -1}  # -1 = unlimited
+
+def check_and_increment_usage(user_id: int, plan: str, endpoint: str = "architect") -> dict:
+    """Returns {allowed: bool, used: int, limit: int}. Increments count if allowed."""
+    month = datetime.now().strftime("%Y-%m")
+    limit = AI_LIMITS.get(plan, 3)
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO ai_usage (user_id, endpoint, month, call_count) VALUES (?,?,?,0) "
+        "ON CONFLICT(user_id, endpoint, month) DO NOTHING",
+        (user_id, endpoint, month)
+    )
+    c.execute("SELECT call_count FROM ai_usage WHERE user_id=? AND endpoint=? AND month=?",
+              (user_id, endpoint, month))
+    row = c.fetchone()
+    used = row[0] if row else 0
+    if limit != -1 and used >= limit:
+        conn.close()
+        return {"allowed": False, "used": used, "limit": limit}
+    c.execute(
+        "UPDATE ai_usage SET call_count = call_count + 1 WHERE user_id=? AND endpoint=? AND month=?",
+        (user_id, endpoint, month)
+    )
+    conn.commit()
+    conn.close()
+    return {"allowed": True, "used": used + 1, "limit": limit}
 
 # ── HELPERS ────────────────────────────────────────────────────────────────────
 
@@ -2350,6 +2388,64 @@ def chat(req: ChatRequest, request: Request):
     return StreamingResponse(stream(), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
 
+def _repair_json_strings(text: str) -> str:
+    """Fix all common LLM JSON issues: control chars, comments, trailing/missing commas."""
+    # Pass 1: state-machine to strip comments and escape control chars inside strings
+    result = []
+    in_string = False
+    escaped = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if escaped:
+            result.append(ch)
+            escaped = False
+            i += 1
+            continue
+        if ch == '\\' and in_string:
+            result.append(ch)
+            escaped = True
+            i += 1
+            continue
+        if ch == '"':
+            in_string = not in_string
+            result.append(ch)
+            i += 1
+            continue
+        if not in_string:
+            # strip // single-line comments
+            if ch == '/' and i + 1 < len(text) and text[i + 1] == '/':
+                while i < len(text) and text[i] != '\n':
+                    i += 1
+                continue
+            # strip /* block comments */
+            if ch == '/' and i + 1 < len(text) and text[i + 1] == '*':
+                i += 2
+                while i + 1 < len(text) and not (text[i] == '*' and text[i + 1] == '/'):
+                    i += 1
+                i += 2
+                continue
+        if in_string:
+            if ch == '\n':
+                result.append('\\n')
+            elif ch == '\r':
+                result.append('\\r')
+            elif ch == '\t':
+                result.append('\\t')
+            else:
+                result.append(ch)
+        else:
+            result.append(ch)
+        i += 1
+    cleaned = ''.join(result)
+    # Pass 2: remove trailing commas  e.g.  [1, 2,]  →  [1, 2]
+    cleaned = re.sub(r',(\s*[}\]])', r'\1', cleaned)
+    # Pass 3: add missing commas between any value and the next value/key
+    # Covers:  "value"\n"key"   }\n{   ]\n{   }\n"key"   number\n"key"  etc.
+    cleaned = re.sub(r'(["\d}\]])([ \t]*\n[ \t]*)(?=["{[\d])', r'\1,\2', cleaned)
+    cleaned = re.sub(r'\b(true|false|null)([ \t]*\n[ \t]*)(?=["{[\d])', r'\1,\2', cleaned)
+    return cleaned
+
 # ── ARCHITECTURE AGENT ────────────────────────────────────────────────────────
 class ArchAnalyzeRequest(BaseModel):
     canvas: dict  # {nodes: {...}, conns: [...]}
@@ -2371,52 +2467,70 @@ def architect_analyze(req: ArchAnalyzeRequest, request: Request):
         "You are a senior cloud architect AI. You MUST respond with ONLY a raw JSON object. "
         "Do NOT use markdown code fences (no ```json, no ```). Do NOT add any text before or after the JSON. "
         "Your entire response must start with { and end with }. "
+        "IMPORTANT RULES FOR SUGGESTIONS:\n"
+        "- Only flag CRITICAL or HIGH severity issues — wrong connections, missing security, broken data flow.\n"
+        "- Do NOT suggest adding more services just to be thorough. Only suggest a service if it is REQUIRED for the architecture to function correctly or securely.\n"
+        "- Do NOT suggest connections that are optional or nice-to-have.\n"
+        "- If the architecture already looks solid and correct, return empty arrays for issues/remove_conns/add_conns/add_services and give a high score.\n"
+        "- Maximum 4 items in issues, 3 in remove_conns, 3 in add_conns, 3 in add_services.\n"
+        "- Keep all string values SHORT (under 120 characters). No long explanations.\n"
         "Return this exact structure:\n"
         "{\n"
-        '  "score": <0-100 architecture quality score>,\n'
-        '  "summary": "<2-sentence overall assessment>",\n'
+        '  "score": <0-100>,\n'
+        '  "summary": "<1-2 sentence assessment>",\n'
         '  "issues": [{"title": "...", "detail": "..."}],\n'
         '  "remove_conns": [{"from_label": "...", "to_label": "...", "reason": "..."}],\n'
         '  "add_conns": [{"from_label": "...", "to_label": "...", "reason": "..."}],\n'
-        '  "add_services": [{"id": "<service_id>", "label": "<display name>", "group": "<group>", "reason": "..."}],\n'
+        '  "add_services": [{"id": "...", "label": "...", "group": "...", "reason": "..."}],\n'
         '  "remove_services": [{"label": "...", "reason": "..."}],\n'
         '  "best_practices": ["tip1", "tip2"]\n'
         "}\n\n"
-        "Service group values: compute, serverless, container, k8s, database, cache, storage, network, api, security, monitoring, messaging, streaming, cicd, gitops, iac, registry, auth, proxy, mesh.\n"
-        "Architecture rules to enforce:\n"
-        "- Dockerfile/container images are BUILD artifacts managed by CI/CD (GitHub Actions, Jenkins). They should NOT connect directly to ALB, S3, IAM, or databases.\n"
-        "- ALB must sit IN FRONT of compute/containers, not be connected to Dockerfile.\n"
-        "- IAM Role attaches to EC2/Lambda/ECS at runtime, not to build artifacts.\n"
-        "- EC2 needs a VPC. Lambda needs a VPC if accessing private resources.\n"
-        "- Every compute service should have monitoring (CloudWatch/Prometheus).\n"
-        "- Secrets (DB passwords, API keys) should use Secrets Manager or SSM, not hardcoded.\n"
-        "- Production workloads need ALB + Auto Scaling + Multi-AZ RDS.\n"
-        "- CI/CD (GitHub Actions) connects to: ECR (push image), EC2/ECS/EKS (deploy), S3 (artifacts).\n"
-        "- CloudFront connects to: S3 (static origin) or ALB (dynamic origin).\n"
-        "- WAF connects to: ALB or CloudFront, not directly to EC2.\n"
+        "Service groups: compute, serverless, container, k8s, database, cache, storage, network, api, security, monitoring, messaging, streaming, cicd, gitops, iac, registry, auth, proxy, mesh.\n"
+        "Critical rules:\n"
+        "- Dockerfile is a BUILD artifact — must not connect to ALB, S3, IAM, or databases at runtime.\n"
+        "- IAM Role attaches to EC2/Lambda/ECS, not to ALB or build artifacts.\n"
+        "- EC2 requires a VPC.\n"
+        "- CI/CD connects to ECR (push), EC2/ECS/EKS (deploy), S3 (artifacts).\n"
+        "- WAF attaches to ALB or CloudFront only.\n"
     )
 
     user_msg = f"Canvas nodes:\n{json.dumps(node_list, indent=2)}\n\nConnections:\n{json.dumps(conn_desc, indent=2)}"
 
-    def stream():
+    try:
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=system,
+            messages=[{"role": "user", "content": user_msg}]
+        )
+        raw_text = msg.content[0].text
+        # Always write raw output for debugging
         try:
-            with client.messages.stream(
-                model="claude-sonnet-4-6",
-                max_tokens=2000,
-                system=system,
-                messages=[{"role": "user", "content": user_msg}]
-            ) as s:
-                for text in s.text_stream:
-                    safe = text.replace('\n', '\\n')
-                    yield f"data: {safe}\n\n"
-            yield "data: [DONE]\n\n"
-        except Exception as e:
-            logger.error(f"Architect analyze error: {e}")
-            yield f"data: [ERROR] {str(e)}\n\n"
-            yield "data: [DONE]\n\n"
-
-    return StreamingResponse(stream(), media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
+            with open("debug_arch_response.txt", "w", encoding="utf-8") as f:
+                f.write(raw_text)
+        except Exception:
+            pass
+        # Strip markdown fences
+        clean = raw_text.strip()
+        if clean.startswith("```"):
+            clean = re.sub(r'^```[a-z]*\s*', '', clean, flags=re.IGNORECASE)
+            clean = re.sub(r'```\s*$', '', clean).strip()
+        # Find JSON boundaries
+        j_start = clean.find("{")
+        j_end = clean.rfind("}")
+        if j_start == -1 or j_end == -1:
+            raise HTTPException(status_code=500, detail="Claude did not return valid JSON")
+        json_str = clean[j_start:j_end+1]
+        # Repair: escape literal control characters inside JSON strings
+        json_str = _repair_json_strings(json_str)
+        data = json.loads(json_str)
+        return data
+    except json.JSONDecodeError as e:
+        logger.error(f"Architect JSON parse error: {e}\nFull raw output:\n{raw_text}")
+        raise HTTPException(status_code=500, detail=f"JSON parse error: {str(e)}")
+    except Exception as e:
+        logger.error(f"Architect analyze error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ── GITHUB IMPORT → CANVAS ────────────────────────────────────────────────────
 
@@ -2591,6 +2705,272 @@ def github_import(req: GitHubImportRequest, request: Request):
 
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+# ── UPLOAD & ANALYZE ─────────────────────────────────────────────────────────
+
+# Service detection keywords: file patterns → service identifiers
+_UPLOAD_DETECT_MAP = {
+    "Dockerfile": "docker_file", "docker-compose": "docker_compose_prod",
+    "kubernetes": "k8s_deploy", "k8s": "k8s_deploy", "deployment.yaml": "k8s_deploy",
+    "service.yaml": "k8s_deploy", "ingress.yaml": "k8s_ingress",
+    "nginx.conf": "nginx_proxy", "nginx": "nginx_proxy",
+    "prometheus": "prom_cfg", "grafana": "grafana_ds", "loki": "loki_cfg",
+    "terraform": "tf_main", ".tf": "tf_main",
+    "github/workflows": "gha_ci", "jenkinsfile": "jenkins_decl",
+    "gitlab-ci": "gitlab_ci", "argocd": "argocd_app",
+    "redis": "redis_standalone", "postgres": "postgres_docker",
+    "mysql": "mysql_docker", "mongodb": "mongo_docker",
+    "rabbitmq": "rabbitmq_broker", "kafka": "kafka_cluster",
+    "ansible": "ansible_site", "playbook": "ansible_site",
+    "helm": "helm_chart", "chart.yaml": "helm_chart",
+    "vault": "vault_cfg", "keycloak": "keycloak_server",
+    "traefik": "traefik_proxy", "haproxy": "haproxy_cfg",
+    "elasticsearch": "es_cluster", "kibana": "kibana_docker",
+    "fluentd": "fluentd_cfg", "otel": "otel_collector",
+    "celery": "celery_worker", "minio": "minio_server",
+}
+
+_SERVICE_TO_GROUP = {
+    "docker_file": "container", "docker_compose_prod": "container",
+    "k8s_deploy": "k8s", "k8s_ingress": "k8s", "helm_chart": "k8s",
+    "nginx_proxy": "proxy", "traefik_proxy": "proxy", "haproxy_cfg": "proxy",
+    "prom_cfg": "monitoring", "grafana_ds": "monitoring", "loki_cfg": "monitoring",
+    "otel_collector": "monitoring",
+    "tf_main": "iac", "ansible_site": "cfgmgmt",
+    "gha_ci": "cicd", "jenkins_decl": "cicd", "gitlab_ci": "cicd",
+    "argocd_app": "gitops",
+    "redis_standalone": "cache", "postgres_docker": "database",
+    "mysql_docker": "database", "mongo_docker": "database",
+    "rabbitmq_broker": "messaging", "kafka_cluster": "streaming",
+    "vault_cfg": "security", "keycloak_server": "auth",
+    "es_cluster": "monitoring", "kibana_docker": "monitoring",
+    "fluentd_cfg": "monitoring", "celery_worker": "compute",
+    "minio_server": "storage",
+}
+
+_SERVICE_LABELS = {
+    "docker_file": "Dockerfile", "docker_compose_prod": "Docker Compose",
+    "k8s_deploy": "Kubernetes", "k8s_ingress": "K8s Ingress", "helm_chart": "Helm Chart",
+    "nginx_proxy": "Nginx", "traefik_proxy": "Traefik", "haproxy_cfg": "HAProxy",
+    "prom_cfg": "Prometheus", "grafana_ds": "Grafana", "loki_cfg": "Loki",
+    "otel_collector": "OpenTelemetry",
+    "tf_main": "Terraform", "ansible_site": "Ansible",
+    "gha_ci": "GitHub Actions", "jenkins_decl": "Jenkins", "gitlab_ci": "GitLab CI",
+    "argocd_app": "ArgoCD",
+    "redis_standalone": "Redis", "postgres_docker": "PostgreSQL",
+    "mysql_docker": "MySQL", "mongo_docker": "MongoDB",
+    "rabbitmq_broker": "RabbitMQ", "kafka_cluster": "Kafka",
+    "vault_cfg": "Vault", "keycloak_server": "Keycloak",
+    "es_cluster": "Elasticsearch", "kibana_docker": "Kibana",
+    "fluentd_cfg": "Fluentd", "celery_worker": "Celery",
+    "minio_server": "MinIO",
+}
+
+_SERVICE_MONTHLY_USD = {
+    "tf_main": 0, "ansible_site": 0, "gha_ci": 4, "jenkins_decl": 8,
+    "gitlab_ci": 4, "argocd_app": 0, "docker_file": 0, "docker_compose_prod": 5,
+    "k8s_deploy": 75, "k8s_ingress": 20, "helm_chart": 0,
+    "nginx_proxy": 5, "traefik_proxy": 5, "haproxy_cfg": 5,
+    "prom_cfg": 5, "grafana_ds": 5, "loki_cfg": 5, "otel_collector": 5,
+    "redis_standalone": 30, "postgres_docker": 50, "mysql_docker": 45,
+    "mongo_docker": 55, "rabbitmq_broker": 20, "kafka_cluster": 120,
+    "vault_cfg": 10, "keycloak_server": 15,
+    "es_cluster": 80, "kibana_docker": 10, "fluentd_cfg": 5,
+    "celery_worker": 15, "minio_server": 10,
+}
+
+def _detect_services_from_content(text_map: dict) -> list:
+    """Given {filename: content}, return list of detected service IDs (deduped)."""
+    found = {}
+    combined = "\n".join(
+        f"FILE: {k}\n{v[:1000]}" for k, v in text_map.items()
+    ).lower()
+    for keyword, svc_id in _UPLOAD_DETECT_MAP.items():
+        if keyword.lower() in combined:
+            if svc_id not in found:
+                found[svc_id] = True
+    return list(found.keys())
+
+def _read_zip_contents(data: bytes) -> dict:
+    """Extract text files from a zip. Returns {filename: content}."""
+    result = {}
+    TEXT_EXTS = {".tf", ".yml", ".yaml", ".json", ".conf", ".sh", ".py",
+                 ".js", ".ts", ".go", ".rb", ".toml", ".ini", ".env",
+                 ".md", ".txt", ".hcl", ".properties", "dockerfile", ".xml"}
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            for name in zf.namelist():
+                lower = name.lower()
+                ext = os.path.splitext(lower)[1]
+                base = os.path.basename(lower)
+                if ext in TEXT_EXTS or base in TEXT_EXTS or base == "dockerfile":
+                    if not any(skip in lower for skip in [".terraform/", "node_modules/", "__pycache__"]):
+                        try:
+                            content = zf.read(name).decode("utf-8", errors="replace")
+                            result[name] = content[:4000]
+                        except Exception:
+                            pass
+    except Exception:
+        pass
+    return result
+
+@app.post("/upload/analyze")
+@limiter.limit("10/minute")
+async def upload_analyze(
+    request: Request,
+    files: list[UploadFile] = File(default=[]),
+    github_url: str = Form(default=""),
+    budget_usd: float = Form(default=0),
+    currency: str = Form(default="USD"),
+):
+    require_auth(request)
+    text_map: dict = {}
+
+    # 1. Process uploaded files
+    for uf in files:
+        raw = await uf.read()
+        fname = uf.filename or ""
+        lower = fname.lower()
+        if lower.endswith(".zip"):
+            text_map.update(_read_zip_contents(raw))
+        else:
+            ext = os.path.splitext(lower)[1]
+            TEXT_EXTS = {".tf", ".yml", ".yaml", ".json", ".conf", ".sh",
+                         ".py", ".js", ".ts", ".go", ".rb", ".toml", ".ini",
+                         ".env", ".md", ".txt", ".hcl", ".properties", ".xml"}
+            base = os.path.basename(lower)
+            if ext in TEXT_EXTS or base == "dockerfile":
+                try:
+                    text_map[fname] = raw.decode("utf-8", errors="replace")[:4000]
+                except Exception:
+                    pass
+
+    # 2. Fetch GitHub repo if URL provided
+    if github_url and github_url.strip():
+        github_token = os.getenv("GITHUB_TOKEN", "")
+        repo_input = github_url.strip().rstrip("/").replace(".git", "")
+        if "github.com" in repo_input:
+            parts = repo_input.split("github.com/")[-1].split("/")
+            owner = parts[0]
+            repo  = parts[1] if len(parts) > 1 else ""
+        else:
+            owner, repo = "", repo_input
+
+        if owner and repo:
+            if github_token:
+                clone_url = f"https://{owner}:{github_token}@github.com/{owner}/{repo}.git"
+            else:
+                clone_url = f"https://github.com/{owner}/{repo}.git"
+            tmp_dir = tempfile.mkdtemp(prefix="upload_gh_")
+            try:
+                r = subprocess.run(
+                    ["git", "clone", "--depth", "1", clone_url, tmp_dir],
+                    capture_output=True, text=True, timeout=60
+                )
+                if r.returncode == 0:
+                    TEXT_EXTS = {".tf", ".yml", ".yaml", ".json", ".conf", ".sh",
+                                 ".py", ".js", ".ts", ".go", ".rb", ".toml", ".ini",
+                                 ".env", ".md", ".txt", ".hcl", ".properties", ".xml"}
+                    for root, dirs, fnames in os.walk(tmp_dir):
+                        dirs[:] = [d for d in dirs if d not in [".git", ".terraform", "node_modules"]]
+                        for fn in fnames:
+                            ext = os.path.splitext(fn)[1].lower()
+                            base = fn.lower()
+                            if ext in TEXT_EXTS or base == "dockerfile":
+                                try:
+                                    fp = os.path.join(root, fn)
+                                    rel = os.path.relpath(fp, tmp_dir)
+                                    with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+                                        text_map[rel] = fh.read()[:4000]
+                                except Exception:
+                                    pass
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    if not text_map:
+        raise HTTPException(status_code=400, detail="No readable files found. Upload a zip, individual files, or a valid GitHub URL.")
+
+    # 3. Ask Claude to detect services and suggest architecture
+    file_summary = "\n".join(
+        f"=== {fname} ===\n{content[:600]}" for fname, content in list(text_map.items())[:30]
+    )
+    budget_context = ""
+    if budget_usd and budget_usd > 0:
+        inr = round(budget_usd * 84)
+        budget_context = f"\nBudget: ${budget_usd}/month (≈ ₹{inr}/month). Suggest infrastructure that fits within this budget."
+
+    prompt = (
+        "Analyze the following source code files and detect all infrastructure services present.\n"
+        "Return ONLY a raw JSON object (no markdown, no text before/after).\n"
+        f"{budget_context}\n\n"
+        "JSON structure:\n"
+        '{"services": [{"id": "<service_id>", "label": "<Name>", "group": "<group>", "reason": "<why detected>"}], '
+        '"connections": [{"from_label": "A", "to_label": "B"}], '
+        '"summary": "<1-2 sentence description of the project>", '
+        '"tech_stack": ["tech1", "tech2"], '
+        '"budget_breakdown": [{"service": "name", "usd": 10}]}\n\n'
+        "Service IDs to use: docker_file, docker_compose_prod, k8s_deploy, k8s_ingress, helm_chart, "
+        "nginx_proxy, traefik_proxy, prom_cfg, grafana_ds, loki_cfg, tf_main, ansible_site, "
+        "gha_ci, jenkins_decl, gitlab_ci, argocd_app, redis_standalone, postgres_docker, "
+        "mysql_docker, mongo_docker, rabbitmq_broker, kafka_cluster, vault_cfg, keycloak_server, "
+        "es_cluster, kibana_docker, fluentd_cfg, celery_worker, minio_server, otel_collector.\n"
+        "Groups: container, k8s, proxy, monitoring, iac, cfgmgmt, cicd, gitops, cache, "
+        "database, messaging, streaming, security, auth, storage, compute.\n\n"
+        f"FILES:\n{file_summary}"
+    )
+
+    try:
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = msg.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r'^```[a-z]*\s*', '', raw, flags=re.IGNORECASE)
+            raw = re.sub(r'```\s*$', '', raw).strip()
+        j_start = raw.find("{")
+        j_end   = raw.rfind("}")
+        if j_start != -1 and j_end != -1:
+            data = json.loads(_repair_json_strings(raw[j_start:j_end+1]))
+        else:
+            raise ValueError("No JSON in response")
+    except Exception as e:
+        # Fallback: local keyword detection
+        detected_ids = _detect_services_from_content(text_map)
+        data = {
+            "services": [
+                {"id": sid, "label": _SERVICE_LABELS.get(sid, sid),
+                 "group": _SERVICE_TO_GROUP.get(sid, "compute"), "reason": "Detected in source files"}
+                for sid in detected_ids
+            ],
+            "connections": [],
+            "summary": "Services detected from source code analysis.",
+            "tech_stack": [],
+            "budget_breakdown": []
+        }
+
+    # Enrich with budget estimates
+    total_usd = 0
+    for svc in data.get("services", []):
+        sid = svc.get("id", "")
+        monthly = _SERVICE_MONTHLY_USD.get(sid, 5)
+        svc["monthly_usd"] = monthly
+        svc["monthly_inr"] = round(monthly * 84)
+        total_usd += monthly
+
+    inr_total = round(total_usd * 84)
+    data["total_monthly_usd"] = total_usd
+    data["total_monthly_inr"] = inr_total
+    data["currency"] = currency
+    data["files_analyzed"] = len(text_map)
+    if budget_usd and budget_usd > 0:
+        data["budget_usd"] = budget_usd
+        data["budget_inr"] = round(budget_usd * 84)
+        data["budget_ok"] = total_usd <= budget_usd
+
+    return data
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

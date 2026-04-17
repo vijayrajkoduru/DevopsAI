@@ -287,8 +287,9 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
   <div class="topbar-divider"></div>
   <div class="nav-tab active" id="tab-canvas" onclick="showPage('canvas')">Infrastructure Canvas</div>
   <div class="nav-tab" id="tab-gen" onclick="showPage('gen')">Code Generator</div>
+  <div class="nav-tab" id="tab-upload" onclick="showPage('upload')">📁 Upload & Analyze</div>
   <div class="topbar-right">
-    <div id="readiness-badge" onclick="validateArchitecture()" title="Enterprise Readiness — click to validate" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#0d0d1a;border:1px solid #1e2a1e;border-radius:20px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='#4ade80'" onmouseout="this.style.borderColor='#1e2a1e'">
+    <div id="readiness-badge" title="Enterprise Readiness" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#0d0d1a;border:1px solid #1e2a1e;border-radius:20px;transition:all 0.2s">
       <svg width="20" height="20" viewBox="0 0 20 20" style="flex-shrink:0"><circle cx="10" cy="10" r="8" fill="none" stroke="#1e2a1e" stroke-width="2.5"/><circle id="readiness-arc" cx="10" cy="10" r="8" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-dasharray="0 50.27" stroke-linecap="round" transform="rotate(-90 10 10)" style="transition:stroke-dasharray 0.6s ease,stroke 0.4s"/></svg>
       <span id="readiness-pct" style="font-size:11px;font-weight:700;color:#4ade80">0%</span>
       <span id="readiness-label" style="font-size:10px;color:#555">Ready</span>
@@ -353,14 +354,10 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
       <button class="tbb" onclick="showAddGroupForm()" style="background:linear-gradient(135deg,#1a1a2e,#2a1a3e);border-color:#4a3a6e;color:#c4b5fd">＋ Add Group</button>
       <button class="tbb red" onclick="clearCanvas()">🗑 Clear</button>
       <div class="tb-sep"></div>
-      <button class="tbb" onclick="zoomOut()" title="Zoom out">−</button>
       <span class="zl" id="zoom-label">100%</span>
-      <button class="tbb" onclick="zoomIn()" title="Zoom in">+</button>
-      <button class="tbb" onclick="zoomReset()" title="Reset zoom">↺</button>
       <button class="tbb" onclick="autoArrange()" title="Auto-arrange nodes" style="background:#0d1a0d;border-color:#166534;color:#4ade80">⊞ Set</button>
       <div style="flex:1"></div>
       <button onclick="openArchitect()" style="padding:5px 14px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;color:#fff;display:flex;align-items:center;gap:6px;flex-shrink:0">🏗 Architect</button>
-      <button class="tbb" onclick="validateArchitecture()" style="background:#0a1a0a;border-color:#166534;color:#4ade80">🔍 Validate</button>
       <button class="tbb" id="cost-toggle-btn" onclick="toggleCostBadges()" style="background:#13131f;border-color:#1e1e30;color:#666">💰 Show Costs</button>
       <button class="tbb purple" onclick="genAll()">⚡ Generate All</button>
       <button class="tbb green" onclick="toggleDeploy()">🚀 Deploy</button>
@@ -373,7 +370,6 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
           <div class="tb-more-item" onclick="exportCfg();closeTbMore()">↓ Export Config</div>
         </div>
       </div>
-      <button id="rp-toggle" class="tbb" onclick="toggleRpanel()" title="Toggle properties panel">▶ Props</button>
     </div>
     <!-- LEGEND -->
     <div class="leg">
@@ -504,8 +500,8 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
       <p style="font-size:9px;color:#1a1a2e;margin-top:10px;line-height:2">Del — delete node &nbsp;·&nbsp; Ctrl+S — save<br>Space+drag — pan &nbsp;·&nbsp; Scroll — zoom</p>
     </div>
   </div>
-  <div class="rpanel-resizer" id="rpanel-resizer"></div>
-  <div class="rpanel" id="rpanel">
+  <div class="rpanel-resizer" id="rpanel-resizer" style="display:none"></div>
+  <div class="rpanel" id="rpanel" style="display:none">
     <div class="rp-head"><div class="rp-ico" id="rpico">⚙</div><h3 id="rptitle">Properties</h3></div>
     <div class="rp-body" id="rpbody">
       <div class="empty-st"><div style="font-size:24px;opacity:0.1;margin-bottom:8px">🗺</div><p>Drag a service to the canvas<br>then click it to configure<br>and generate code</p></div>
@@ -552,6 +548,98 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
     </div>
   </div>
 </div>
+
+<!-- UPLOAD & ANALYZE PAGE -->
+<div class="page" id="page-upload">
+  <div style="flex:1;overflow-y:auto;padding:32px 40px;background:#0a0a12">
+    <div style="max-width:860px;margin:0 auto">
+      <div style="font-size:22px;font-weight:800;color:#fff;margin-bottom:6px">📁 Upload & Analyze</div>
+      <div style="font-size:12px;color:#555;margin-bottom:28px">Upload your source code — the AI will detect all services and build the canvas automatically</div>
+
+      <!-- Two-column input -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+        <!-- File Upload -->
+        <div>
+          <div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Source Files</div>
+          <div id="upload-dropzone"
+            style="border:2px dashed #2a2a40;border-radius:12px;padding:32px 20px;text-align:center;cursor:pointer;transition:all 0.2s;background:#0d0d1a"
+            ondragover="event.preventDefault();this.style.borderColor='#6c47ff';this.style.background='#13102a'"
+            ondragleave="this.style.borderColor='#2a2a40';this.style.background='#0d0d1a'"
+            ondrop="uploadHandleDrop(event)"
+            onclick="document.getElementById('upload-file-input').click()">
+            <div style="font-size:28px;margin-bottom:8px">📂</div>
+            <div style="font-size:13px;font-weight:600;color:#888">Drop files here or click to browse</div>
+            <div style="font-size:11px;color:#444;margin-top:4px">Supports .zip or individual files (.tf, .yml, Dockerfile, etc.)</div>
+          </div>
+          <input type="file" id="upload-file-input" multiple accept=".zip,.tf,.yml,.yaml,.json,.sh,.py,.js,.conf,.dockerfile,.md,.hcl,.toml,.env" style="display:none" onchange="uploadHandleFiles(this.files)">
+          <div id="upload-file-list" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
+        </div>
+
+        <!-- GitHub URL + Budget -->
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">GitHub Repository URL</div>
+            <input id="upload-github-url" type="text" placeholder="https://github.com/username/repo" style="width:100%;background:#0d0d1a;border:1px solid #2a2a40;border-radius:8px;padding:10px 12px;color:#ddd;font-size:12px;outline:none" onfocus="this.style.borderColor='#6c47ff'" onblur="this.style.borderColor='#2a2a40'">
+            <div style="font-size:10px;color:#444;margin-top:4px">Or enter a public/private GitHub repo URL</div>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Monthly Budget</div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <div style="position:relative;flex:1">
+                <span id="upload-currency-symbol" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#888;font-size:12px">$</span>
+                <input id="upload-budget" type="number" min="0" step="1" placeholder="0" style="width:100%;background:#0d0d1a;border:1px solid #2a2a40;border-radius:8px;padding:10px 10px 10px 22px;color:#ddd;font-size:12px;outline:none" onfocus="this.style.borderColor='#6c47ff'" onblur="this.style.borderColor='#2a2a40'">
+              </div>
+              <button id="upload-currency-btn" onclick="uploadToggleCurrency()" style="padding:8px 14px;background:#13131f;border:1px solid #2a2a40;border-radius:8px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">USD ⇄ INR</button>
+            </div>
+            <div id="upload-budget-hint" style="font-size:10px;color:#444;margin-top:4px">Enter 0 for no budget limit</div>
+          </div>
+          <button onclick="runUploadAnalysis()" id="upload-analyze-btn" style="padding:12px 20px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:9px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity 0.2s" onmouseover="this.style.opacity='0.88'" onmouseout="this.style.opacity='1'">
+            <span id="upload-btn-icon">🔍</span> <span id="upload-btn-txt">Analyze & Build Canvas</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Results -->
+      <div id="upload-results" style="display:none">
+        <!-- Summary bar -->
+        <div id="upload-summary-bar" style="background:#0d0d1a;border:1px solid #2a2a40;border-radius:10px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div style="flex:1">
+            <div id="upload-summary-text" style="font-size:13px;font-weight:600;color:#ddd"></div>
+            <div id="upload-tech-stack" style="font-size:11px;color:#666;margin-top:3px"></div>
+          </div>
+          <div style="text-align:center;padding:8px 16px;background:#13131f;border-radius:8px;border:1px solid #2a2a40">
+            <div id="upload-cost-usd" style="font-size:16px;font-weight:800;color:#4ade80;font-family:monospace"></div>
+            <div id="upload-cost-inr" style="font-size:11px;color:#555"></div>
+            <div id="upload-budget-status" style="font-size:10px;margin-top:2px"></div>
+          </div>
+        </div>
+
+        <!-- Services grid -->
+        <div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Detected Services</div>
+        <div id="upload-services-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:20px"></div>
+
+        <!-- Connections -->
+        <div id="upload-connections-wrap" style="display:none;margin-bottom:20px">
+          <div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Detected Connections</div>
+          <div id="upload-connections-list" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+        </div>
+
+        <!-- Build canvas button -->
+        <button onclick="uploadBuildCanvas()" style="width:100%;padding:14px;background:linear-gradient(135deg,#166534,#16a34a);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:opacity 0.2s" onmouseover="this.style.opacity='0.88'" onmouseout="this.style.opacity='1'">
+          🏗 Build Canvas with Detected Services
+        </button>
+      </div>
+
+      <!-- Empty/loading state -->
+      <div id="upload-empty" style="text-align:center;padding:60px 20px;color:#333">
+        <div style="font-size:48px;margin-bottom:12px">📂</div>
+        <div style="font-size:14px;color:#444">Upload your project files or enter a GitHub URL above</div>
+        <div style="font-size:11px;color:#333;margin-top:6px">The AI will scan your code and detect all infrastructure services</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── AWS ICONS ─────────────────────────────────────────────────────────────────
 var AWS_ICONS = {
@@ -2008,11 +2096,20 @@ function drawLines(){
   }
 }
 // ── SELECT & CONFIG ───────────────────────────────────────────────────────────
+function hideRpanel(){
+  var rp=document.getElementById("rpanel");var rs=document.getElementById("rpanel-resizer");
+  if(rp)rp.style.display="none";if(rs)rs.style.display="none";
+}
+function showRpanel(){
+  var rp=document.getElementById("rpanel");var rs=document.getElementById("rpanel-resizer");
+  if(rp)rp.style.display="flex";if(rs)rs.style.display="block";
+}
 function selectNode(id){
   if(connFrom){nodeClicked(id);return;}
   document.querySelectorAll(".node").forEach(function(n){n.classList.remove("selected");});
   document.getElementById(id).classList.add("selected");
   selId=id;
+  showRpanel();
   showSelectHighlight(id);
   var nd=nodes[id],m=nd.meta;
   var icoEl=makeIcoEl(m.id,26);
@@ -2266,8 +2363,7 @@ async function estimateCost(id){
 function delNode(id){
   for(var i=conns.length-1;i>=0;i--){if(conns[i].f===id||conns[i].t===id)conns.splice(i,1);}
   var el=document.getElementById(id);if(el)el.remove();
-  delete nodes[id];selId=null;
-  document.getElementById("rpbody").innerHTML='<div class="empty-st"><div style="font-size:24px;opacity:0.1;margin-bottom:8px">🗺</div><p>Select any node to configure</p></div>';
+  delete nodes[id];selId=null;hideRpanel();
   drawLines();updateCostPanel();
 }
 function clearCanvas(){
@@ -2279,7 +2375,7 @@ function clearCanvas(){
   var v=Object.keys(vpcs);for(var i=0;i<v.length;i++)delete vpcs[v[i]];
   var a=Object.keys(azs);for(var i=0;i<a.length;i++)delete azs[a[i]];
   var gr=Object.keys(groups);for(var i=0;i<gr.length;i++)delete groups[gr[i]];
-  drawLines();selId=null;
+  drawLines();selId=null;hideRpanel();
   document.getElementById("hint").style.display="block";
   document.getElementById("rpbody").innerHTML='<div class="empty-st"><div style="font-size:24px;opacity:0.1;margin-bottom:8px">🗺</div><p>Drag a service to the canvas<br>then click it to configure</p></div>';
 }
@@ -2660,14 +2756,14 @@ function addServiceFromValidator(id, name){
   createNode(meta,cx,cy);
   document.getElementById("hint").style.display="none";
   showNotif("ok","Added!",name+" added to canvas.","Select it to configure properties.",3000);
-  validateArchitecture();
+  updateReadiness();
 }
 function smartConnectNodes(fromId, toId){
   if(!nodes[fromId]||!nodes[toId])return;
   var already=conns.some(function(c){return (c.f===fromId&&c.t===toId)||(c.t===fromId&&c.f===toId);});
   if(!already){conns.push({f:fromId,t:toId});drawLines();}
   showNotif("ok","Connected!",nodes[fromId].meta.label+" ↔ "+nodes[toId].meta.label,"Connection created successfully.",2500);
-  validateArchitecture();
+  updateReadiness();
 }
 function smartConnectAll(fromId, idsStr){
   var ids=idsStr.split(',');var count=0;
@@ -2678,7 +2774,7 @@ function smartConnectAll(fromId, idsStr){
   });
   drawLines();
   showNotif("ok","Connected All!",count+" connections created for "+nodes[fromId].meta.label,"All recommended connections are now wired.",3000);
-  validateArchitecture();
+  updateReadiness();
 }
 function removeNodeFromValidator(nid){
   if(!nodes[nid])return;
@@ -2686,10 +2782,9 @@ function removeNodeFromValidator(nid){
   conns=conns.filter(function(c){return c.f!==nid&&c.t!==nid;});
   var el=document.getElementById(nid);if(el)el.remove();
   delete nodes[nid];
-  if(selId===nid){selId=null;document.getElementById("props").style.display="none";}
+  if(selId===nid){selId=null;hideRpanel();}
   drawLines();updateReadiness();
   showNotif("ok","Removed",label+" removed from canvas.","",2000);
-  validateArchitecture();
 }
 
 function mergeNodes(keepId, removeId){
@@ -2715,7 +2810,7 @@ function mergeNodes(keepId, removeId){
   if(selId===removeId){selId=keepId;selectNode(keepId);}
   drawLines();updateReadiness();
   showNotif("ok","Merged!",removeLabel+" merged into "+keepLabel+". "+transferred+" connections transferred.","",3500);
-  validateArchitecture();
+  updateReadiness();
 }
 
 async function genAll(){
@@ -2727,7 +2822,7 @@ async function genAll(){
 async function _runGenAll(ids, reqs){
   var success=0,failed=0,lastErr='';
   // Deselect all nodes first
-  if(selId){var selEl=document.getElementById(selId);if(selEl)selEl.classList.remove("selected");selId=null;}
+  if(selId){var selEl=document.getElementById(selId);if(selEl)selEl.classList.remove("selected");selId=null;hideRpanel();}
   // Show immediate feedback so user knows it started
   showNotif("info","Starting...","Generating code for "+ids.length+" services — please wait","",0);
   await new Promise(function(r){setTimeout(r,300);});
@@ -2999,6 +3094,16 @@ cvs.addEventListener("mousedown",function(e){
     e.preventDefault();e.stopPropagation();
     isPanning=true;panStartX=e.clientX;panStartY=e.clientY;panOriginX=panX;panOriginY=panY;
     cvs.style.cursor="grabbing";
+  }
+  // Deselect when clicking canvas background (not a node or its children)
+  if(e.button===0&&!spaceDown){
+    var t=e.target;
+    var onNode=false;
+    while(t&&t!==cvs){if(t.classList&&t.classList.contains("node")){onNode=true;break;}t=t.parentElement;}
+    if(!onNode&&selId){
+      document.querySelectorAll(".node").forEach(function(n){n.classList.remove("selected");});
+      selId=null;clearCompatHighlight();hideRpanel();
+    }
   }
 });
 cvs.addEventListener("mousemove",function(e){
@@ -3455,7 +3560,6 @@ async function checkAuth() {
   try {
     var r = await fetch('/auth/me');
     var data = await r.json();
-    if (badge) { badge.innerHTML = '<div class="sdot"></div>Agent Online'; badge.className = 'badge badge-g'; }
     if (data.authenticated) {
       var userBtn = document.getElementById('user-btn');
       var userName = document.getElementById('user-name');
@@ -3464,14 +3568,31 @@ async function checkAuth() {
       if (userBtn) userBtn.style.display = 'flex';
       if (userName) userName.textContent = data.name;
       var plan = data.plan || 'free';
+      var planLabel = plan.charAt(0).toUpperCase()+plan.slice(1);
+      // Badge shows subscription plan, not API credits
+      var planColors = {free:'badge badge-g', pro:'badge badge-g', team:'badge badge-g'};
+      var planBg = plan==='team'?'linear-gradient(135deg,#6c47ff,#a78bfa)':plan==='pro'?'linear-gradient(135deg,#2563eb,#6c47ff)':'';
+      if (badge) {
+        badge.className = 'badge badge-g';
+        badge.style.cssText = planBg ? 'background:'+planBg+';border-color:transparent' : '';
+        badge.innerHTML = '<div class="sdot"></div>'+planLabel+' Plan';
+      }
+      // Update Arch Agent panel subtitle to show plan
+      var aapSub = document.querySelector('#arch-agent-panel .aap-head > div > div:last-child');
+      if (aapSub) aapSub.textContent = planLabel+' Plan — AI architecture review';
+      // Update Arch Agent dot color by plan
+      var aapDot = document.getElementById('aap-agent-dot');
+      if (aapDot) { var dotColor=plan==='team'?'#a78bfa':plan==='pro'?'#60a5fa':'#4ade80'; aapDot.style.background=dotColor; aapDot.style.boxShadow='0 0 6px '+dotColor; }
       if (userPlan) {
         var planSpan = userPlan.querySelector('span');
-        if (planSpan) planSpan.textContent = plan.charAt(0).toUpperCase()+plan.slice(1)+' Plan • '+data.email;
+        if (planSpan) planSpan.textContent = planLabel+' Plan • '+data.email;
         var upgradeLink = document.getElementById('upgrade-link');
         if (upgradeLink) upgradeLink.style.display = plan === 'free' ? 'inline-block' : 'none';
       }
       if (avatarEl) avatarEl.textContent = data.name.charAt(0).toUpperCase();
       loadSavedCreds();
+    } else {
+      if (badge) { badge.innerHTML = '⚠ Agent Offline'; badge.className = 'badge'; badge.style.cssText='color:#f87171;background:#2a0a0a;border:1px solid #5a1a1a'; }
     }
   } catch(e) {
     if (badge) { badge.innerHTML = '⚠ Agent Offline'; badge.className = 'badge'; badge.style.cssText='color:#f87171;background:#2a0a0a;border:1px solid #5a1a1a'; }
@@ -3503,7 +3624,7 @@ function closeSettings() {
 
 // ── CREDENTIALS VAULT ─────────────────────────────────────────────────────────
 function switchVaultTab(tab) {
-  ['aws','github','docker','domain','anthropic'].forEach(function(t) {
+  ['aws','github','docker','domain'].forEach(function(t) {
     document.getElementById('vpanel-'+t).style.display = t===tab ? '' : 'none';
     var el = document.getElementById('vtab-'+t);
     if (t===tab) el.classList.add('active'); else el.classList.remove('active');
@@ -3565,8 +3686,7 @@ async function deleteVaultService(service, msgId) {
     msg.style.display='block'; msg.style.background='#0a0a14'; msg.style.color='#888';
     msg.textContent = 'Credentials removed.';
     // clear input fields for this service
-    var fieldMap = {github:['v-gh-token','v-gh-user'], docker:['v-dk-user','v-dk-pass'],
-                    domain:['v-dm-name'], anthropic:['v-an-key']};
+    var fieldMap = {github:['v-gh-token','v-gh-user'], docker:['v-dk-user','v-dk-pass'], domain:['v-dm-name']};
     (fieldMap[service]||[]).forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
     loadVaultStatus();
   } catch(e) {
@@ -3579,7 +3699,7 @@ async function loadVaultStatus() {
   try {
     var r = await fetch('/vault/all/status');
     var d = await r.json();
-    ['aws','github','docker','domain','anthropic'].forEach(function(s) {
+    ['aws','github','docker','domain'].forEach(function(s) {
       var dot = document.getElementById('vst-'+s);
       if (dot) dot.className = 'vault-status ' + (d[s] ? 'ok' : 'warn');
       var ddDot = document.getElementById('dd-st-'+s);
@@ -3818,7 +3938,6 @@ async function doGitHubPush() {
       <div class="vault-tab" id="vtab-github" onclick="switchVaultTab('github')">🐙 GitHub <span class="vault-status warn" id="vst-github"></span></div>
       <div class="vault-tab" id="vtab-docker" onclick="switchVaultTab('docker')">🐳 Docker <span class="vault-status warn" id="vst-docker"></span></div>
       <div class="vault-tab" id="vtab-domain" onclick="switchVaultTab('domain')">🌐 Domain <span class="vault-status warn" id="vst-domain"></span></div>
-      <div class="vault-tab" id="vtab-anthropic" onclick="switchVaultTab('anthropic')">🤖 Anthropic <span class="vault-status warn" id="vst-anthropic"></span></div>
     </div>
 
     <!-- AWS Tab -->
@@ -3895,16 +4014,6 @@ async function doGitHubPush() {
       <div id="v-dm-msg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:7px;font-size:12px"></div>
     </div>
 
-    <!-- Anthropic Tab -->
-    <div id="vpanel-anthropic" style="display:none">
-      <div style="margin-bottom:16px"><label class="vault-lbl">Anthropic API Key</label><input id="v-an-key" type="password" placeholder="sk-ant-api03-..." class="vault-inp"></div>
-      <div style="font-size:11px;color:#555;margin-bottom:14px">Get your key at: <a href="https://console.anthropic.com/account/keys" target="_blank" style="color:#c4b5fd">console.anthropic.com</a></div>
-      <div style="display:flex;gap:8px">
-        <button onclick="saveVaultService('anthropic',{api_key:document.getElementById('v-an-key').value},'v-an-msg')" style="flex:1;padding:10px;background:linear-gradient(135deg,#7c3aed,#6c47ff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">💾 Save API Key</button>
-        <button onclick="deleteVaultService('anthropic','v-an-msg')" style="padding:10px 14px;background:#13131f;border:1px solid #3a1a1a;border-radius:8px;color:#f87171;font-size:13px;cursor:pointer">✕ Clear</button>
-      </div>
-      <div id="v-an-msg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:7px;font-size:12px"></div>
-    </div>
 
     <div style="margin-top:16px;padding:10px 12px;background:#0a0a14;border-radius:7px;font-size:11px;color:#444;line-height:1.7">
       🔒 All credentials are stored securely in the database per user account and never shared. They are auto-injected when you Generate, Deploy, or Push to GitHub.
@@ -5822,7 +5931,7 @@ document.addEventListener('DOMContentLoaded', function() {
 #arch-agent-bubble:hover{transform:scale(1.1);box-shadow:0 6px 28px rgba(108,71,255,0.7)}
 #arch-agent-bubble .bubble-pulse{position:absolute;width:100%;height:100%;border-radius:50%;background:rgba(108,71,255,0.3);animation:bubble-ping 2s ease-out infinite}
 @keyframes bubble-ping{0%{transform:scale(1);opacity:0.6}100%{transform:scale(1.8);opacity:0}}
-#arch-agent-panel{position:fixed;bottom:92px;right:28px;width:380px;max-height:78vh;background:#0a0a16;border:1px solid #2a2a40;border-radius:16px;z-index:9001;display:none;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,0.7);overflow:hidden}
+#arch-agent-panel{position:fixed;bottom:92px;right:28px;width:520px;max-width:90vw;max-height:82vh;min-width:320px;background:#0a0a16;border:1px solid #2a2a40;border-radius:16px;z-index:9001;display:none;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,0.7);overflow:hidden;resize:both}
 #arch-agent-panel.open{display:flex}
 .aap-head{display:flex;align-items:center;gap:10px;padding:14px 16px;background:#0d0d1e;border-bottom:1px solid #1e1e30;flex-shrink:0}
 .aap-body{flex:1;overflow-y:auto;padding:14px 16px}
@@ -5865,7 +5974,7 @@ document.addEventListener('DOMContentLoaded', function() {
 </div>
 
 <script>
-var _aapOpen=false;
+var _aapOpen=false,_lastArchData=null;
 function toggleArchAgent(){
   _aapOpen=!_aapOpen;
   document.getElementById("arch-agent-panel").classList.toggle("open",_aapOpen);
@@ -5887,52 +5996,22 @@ async function runArchAgent(){
 
   try{
     var res=await fetch("/architect/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),credentials:"include"});
-    var reader=res.body.getReader();
-    var decoder=new TextDecoder();
-    var raw="";
-    while(true){
-      var result=await reader.read();if(result.done)break;
-      var lines=decoder.decode(result.value).split("\n");
-      for(var i=0;i<lines.length;i++){
-        var line=lines[i];
-        if(!line.startsWith("data: "))continue;
-        var chunk=line.slice(6).trim();
-        if(chunk==="[DONE]")break;
-        if(chunk.startsWith("[ERROR]")){body.innerHTML='<div style="color:#f87171;padding:16px;font-size:11px">'+chunk+'</div>';btn.disabled=false;ico.textContent="⚡";lbl.textContent="Re-Analyze";return;}
-        raw+=chunk.replace(/\\n/g,"\n");
-      }
-    }
+    var data=await res.json();
     btn.disabled=false;ico.textContent="⚡";lbl.textContent="Re-Analyze";
-    _renderArchAgentResult(raw);
+    if(!res.ok){
+      body.innerHTML='<div style="color:#f87171;padding:16px;font-size:12px">Error: '+(data.detail||res.status)+'</div>';
+      return;
+    }
+    _renderArchAgentResult(data);
   }catch(e){
     btn.disabled=false;ico.textContent="⚡";lbl.textContent="Analyze Architecture";
     body.innerHTML='<div style="color:#f87171;padding:16px;font-size:11px">Error: '+e.message+'</div>';
-  });
+  }
 }
 
-function _renderArchAgentResult(raw){
+function _renderArchAgentResult(data){
+  _lastArchData=data;
   var body=document.getElementById("aap-body");
-  var data;
-  try{
-    // Strip markdown code fences (```json ... ``` or ``` ... ```)
-    var clean=raw.replace(/```json\s*/gi,"").replace(/```\s*/g,"").trim();
-    var jsonStart=clean.indexOf("{");
-    var jsonEnd=clean.lastIndexOf("}");
-    if(jsonStart===-1||jsonEnd===-1)throw new Error("No JSON object found");
-    data=JSON.parse(clean.slice(jsonStart,jsonEnd+1));
-  }catch(e){
-    // Retry: try to extract just the JSON block
-    try{
-      var m=raw.match(/\{[\s\S]*\}/);
-      if(m)data=JSON.parse(m[0]);
-      else throw new Error("No JSON");
-    }catch(e2){
-      body.innerHTML='<div style="color:#f87171;padding:12px;font-size:11px;line-height:1.6">'
-        +'<strong>Parse error — retrying...</strong><br>'
-        +'<button onclick="runArchAgent()" style="margin-top:8px;padding:5px 14px;background:#6c47ff;border:none;border-radius:6px;color:#fff;font-size:11px;cursor:pointer">Try Again</button>'
-        +'</div>';return;
-    }
-  }
 
   var score=data.score||0;
   var scoreCol=score>=80?"#4ade80":score>=50?"#fbbf24":"#f87171";
@@ -6005,10 +6084,18 @@ function _renderArchAgentResult(raw){
     });
   }
 
-  // Fix All button
-  html+='<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e1e30">'
-    +'<button onclick="aapFixAll()" style="width:100%;padding:9px;background:linear-gradient(135deg,#166534,#15803d);border:none;border-radius:8px;color:#4ade80;font-size:12px;font-weight:700;cursor:pointer">⚡ Auto-Fix All Issues</button>'
-    +'</div>';
+  var hasActions=(data.remove_conns&&data.remove_conns.length)||(data.add_conns&&data.add_conns.length)||(data.add_services&&data.add_services.length)||(data.remove_services&&data.remove_services.length);
+  if(score>=75&&!hasActions){
+    html+='<div style="margin-top:14px;padding:14px;background:#0a2a0a;border:1px solid #166534;border-radius:10px;text-align:center">'
+      +'<div style="font-size:20px;margin-bottom:6px">✅</div>'
+      +'<div style="font-size:12px;font-weight:700;color:#4ade80">Architecture looks solid!</div>'
+      +'<div style="font-size:10px;color:#555;margin-top:4px">No critical issues found. Run again after making changes.</div>'
+      +'</div>';
+  } else if(hasActions){
+    html+='<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e1e30">'
+      +'<button onclick="aapFixAll()" style="width:100%;padding:9px;background:linear-gradient(135deg,#166534,#15803d);border:none;border-radius:8px;color:#4ade80;font-size:12px;font-weight:700;cursor:pointer">⚡ Auto-Fix All Issues</button>'
+      +'</div>';
+  }
 
   body.innerHTML=html;
   // Store result for fix-all
@@ -6031,6 +6118,29 @@ function aapRemoveConn(fromLabel, toLabel, btn){
   else{btn.textContent="Not found";btn.disabled=true;}
 }
 
+function _aapEnsureService(label){
+  // Find existing node by label
+  var found=null;
+  Object.keys(nodes).forEach(function(nid){
+    if(nodes[nid].meta.label===label||(nodes[nid].config&&nodes[nid].config.name===label))found=nid;
+  });
+  if(found)return found;
+  // Try to find in add_services list from last arch result
+  var svcDef=null;
+  if(_lastArchData&&_lastArchData.add_services){
+    _lastArchData.add_services.forEach(function(s){if(s.label===label)svcDef=s;});
+  }
+  var id=svcDef?svcDef.id:label.toLowerCase().replace(/\s+/g,'_');
+  var grp=svcDef?svcDef.group:resolveServiceGroup(id)||'compute';
+  var meta={id:id,label:label,catName:'AWS',subName:'',group:grp,catType:'aws'};
+  var cx=120+Math.random()*400,cy=80+Math.random()*300;
+  createNode(meta,cx,cy);
+  // return the newly created node id
+  var newId=null;
+  Object.keys(nodes).forEach(function(nid){if(nodes[nid].meta.label===label)newId=nid;});
+  return newId;
+}
+
 function aapAddConn(fromLabel, toLabel, btn){
   var fid=null,tid=null;
   Object.keys(nodes).forEach(function(nid){
@@ -6044,8 +6154,16 @@ function aapAddConn(fromLabel, toLabel, btn){
     drawLines();updateReadiness();
     btn.textContent="✓ Connected";btn.style.background="#0d3a0d";btn.disabled=true;
   } else {
-    // Services not on canvas yet
-    btn.textContent="Add services first";btn.disabled=true;
+    // Auto-add missing services then connect
+    if(!fid) fid=_aapEnsureService(fromLabel);
+    if(!tid) tid=_aapEnsureService(toLabel);
+    if(fid&&tid){
+      conns.push({f:fid,t:tid});
+      drawLines();updateReadiness();
+      btn.textContent="✓ Added & Connected";btn.style.background="#0d3a0d";btn.style.color="#4ade80";btn.disabled=true;
+    } else {
+      btn.textContent="Could not add";btn.disabled=true;
+    }
   }
 }
 
@@ -6067,21 +6185,29 @@ function aapRemoveService(label,btn){
     conns=conns.filter(function(c){return c.f!==found&&c.t!==found;});
     var el=document.getElementById(found);if(el)el.remove();
     delete nodes[found];
-    if(selId===found){selId=null;document.getElementById("props").style.display="none";}
+    if(selId===found){selId=null;hideRpanel();}
     drawLines();updateReadiness();
     btn.textContent="✓ Removed";btn.disabled=true;
   } else {btn.textContent="Not found";btn.disabled=true;}
 }
 
-function aapFixAll(){
-  var d=window._aapData;if(!d)return;
+function _applyArchFixes(d){
   var fixes=0;
+  // Add missing services first
+  (d.add_services||[]).forEach(function(svc){
+    var exists=Object.keys(nodes).some(function(nid){return nodes[nid].meta.label===svc.label;});
+    if(!exists){
+      var meta={id:svc.id,label:svc.label,catName:"AWS",subName:"",group:svc.group||"compute",catType:"aws"};
+      var cx=100+Math.random()*500,cy=60+Math.random()*350;
+      createNode(meta,cx,cy);fixes++;
+    }
+  });
   // Remove wrong connections
   (d.remove_conns||[]).forEach(function(rc){
     Object.keys(nodes).forEach(function(fid){
-      if(nodes[fid].meta.label===rc.from_label||(nodes[fid].config&&nodes[fid].config.name===rc.from_label)){
+      if(nodes[fid]&&(nodes[fid].meta.label===rc.from_label)){
         Object.keys(nodes).forEach(function(tid){
-          if(nodes[tid].meta.label===rc.to_label||(nodes[tid].config&&nodes[tid].config.name===rc.to_label)){
+          if(nodes[tid]&&(nodes[tid].meta.label===rc.to_label)){
             var before=conns.length;
             conns=conns.filter(function(c){return !((c.f===fid&&c.t===tid)||(c.f===tid&&c.t===fid));});
             if(conns.length<before)fixes++;
@@ -6090,14 +6216,10 @@ function aapFixAll(){
       }
     });
   });
-  // Add correct connections
+  // Add correct connections (auto-create missing nodes)
   (d.add_conns||[]).forEach(function(ac){
-    var fid=null,tid=null;
-    Object.keys(nodes).forEach(function(nid){
-      var lbl=nodes[nid].config&&nodes[nid].config.name?nodes[nid].config.name:nodes[nid].meta.label;
-      if(lbl===ac.from_label||nodes[nid].meta.label===ac.from_label)fid=nid;
-      if(lbl===ac.to_label||nodes[nid].meta.label===ac.to_label)tid=nid;
-    });
+    var fid=_aapEnsureService(ac.from_label);
+    var tid=_aapEnsureService(ac.to_label);
     if(fid&&tid){
       var already=conns.some(function(c){return (c.f===fid&&c.t===tid)||(c.f===tid&&c.t===fid);});
       if(!already){conns.push({f:fid,t:tid});fixes++;}
@@ -6106,18 +6228,215 @@ function aapFixAll(){
   // Remove wrong services
   (d.remove_services||[]).forEach(function(svc){
     Object.keys(nodes).forEach(function(nid){
-      var lbl=nodes[nid].config&&nodes[nid].config.name?nodes[nid].config.name:nodes[nid].meta.label;
-      if(lbl===svc.label||nodes[nid].meta.label===svc.label){
+      if(nodes[nid]&&nodes[nid].meta.label===svc.label){
         conns=conns.filter(function(c){return c.f!==nid&&c.t!==nid;});
         var el=document.getElementById(nid);if(el)el.remove();
         delete nodes[nid];fixes++;
       }
     });
   });
-  if(selId&&!nodes[selId]){selId=null;document.getElementById("props").style.display="none";}
+  if(selId&&!nodes[selId]){selId=null;hideRpanel();}
   drawLines();updateReadiness();
-  showNotif("ok","Fixed!",fixes+" architectural issues fixed automatically.","Run Analyze again to verify.",4000);
-  setTimeout(runArchAgent,1000);
+  return fixes;
+}
+
+async function aapFixAll(){
+  var d=window._aapData;if(!d)return;
+  var btn=document.querySelector('[onclick="aapFixAll()"]');
+  if(btn){btn.disabled=true;btn.textContent="⏳ Fixing & Re-analyzing...";}
+
+  // Apply all fixes from current result — one shot, no re-analyze loop
+  var totalFixes=_applyArchFixes(d);
+  // One follow-up analyze to show updated score
+  var body=document.getElementById("aap-body");
+  body.innerHTML='<div style="padding:20px;text-align:center;color:#555"><div style="font-size:20px;margin-bottom:8px">⚙️</div><div style="font-size:11px">Checking result...</div></div>';
+  try{
+    var nids=Object.keys(nodes);var nodeMap={};
+    nids.forEach(function(nid){nodeMap[nid]=nodes[nid];});
+    var res=await fetch("/architect/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({canvas:{nodes:nodeMap,conns:conns}}),credentials:"include"});
+    var newData=await res.json();
+    if(res.ok){window._aapData=newData;_lastArchData=newData;}
+  }catch(e){}
+  _renderArchAgentResult(window._aapData);
+  showNotif("ok","Fixed!",totalFixes+" issues fixed — score: "+(window._aapData.score||0)+"/100","",4000);
+}
+
+// ── UPLOAD & ANALYZE ─────────────────────────────────────────────────────────
+var _uploadFiles = [];
+var _uploadCurrency = "USD";
+var _uploadAnalysisData = null;
+
+function uploadHandleFiles(fileList){
+  for(var i=0;i<fileList.length;i++){
+    var alreadyAdded = _uploadFiles.some(function(f){return f.name===fileList[i].name;});
+    if(!alreadyAdded) _uploadFiles.push(fileList[i]);
+  }
+  _renderUploadFileList();
+}
+function uploadHandleDrop(e){
+  e.preventDefault();
+  var dz=document.getElementById('upload-dropzone');
+  dz.style.borderColor='#2a2a40';dz.style.background='#0d0d1a';
+  uploadHandleFiles(e.dataTransfer.files);
+}
+function _renderUploadFileList(){
+  var el=document.getElementById('upload-file-list');
+  el.innerHTML=_uploadFiles.map(function(f,i){
+    return '<div style="display:flex;align-items:center;gap:5px;background:#13131f;border:1px solid #1e1e30;border-radius:6px;padding:3px 8px;font-size:10px;color:#888">'
+      +'<span>'+f.name+'</span>'
+      +'<span onclick="_uploadFiles.splice('+i+',1);_renderUploadFileList()" style="cursor:pointer;color:#f87171;margin-left:3px">✕</span>'
+      +'</div>';
+  }).join('');
+}
+function uploadToggleCurrency(){
+  _uploadCurrency = _uploadCurrency==='USD' ? 'INR' : 'USD';
+  document.getElementById('upload-currency-symbol').textContent = _uploadCurrency==='USD' ? '$' : '₹';
+  document.getElementById('upload-budget-hint').textContent = _uploadCurrency==='USD'
+    ? 'Enter 0 for no budget limit'
+    : 'Enter budget in Indian Rupees (₹). 0 = no limit';
+}
+
+var _UPLOAD_SVC_ICONS = {
+  container:'🐳',k8s:'⚙',proxy:'🔀',monitoring:'📊',iac:'🏗',cfgmgmt:'📋',
+  cicd:'🔄',gitops:'🔁',cache:'⚡',database:'🗄',messaging:'📨',streaming:'🌊',
+  security:'🔒',auth:'🔑',storage:'📦',compute:'💻',default:'🔧'
+};
+var _UPLOAD_ICON_COLORS = {
+  container:'#2496ED',k8s:'#326CE5',proxy:'#24A1C1',monitoring:'#E6522C',
+  iac:'#7B42BC',cfgmgmt:'#EE0000',cicd:'#24292E',gitops:'#EF7B4D',
+  cache:'#DC382D',database:'#2965CC',messaging:'#FF4F8B',streaming:'#8C4FFF',
+  security:'#DD344C',auth:'#4D9B44',storage:'#3F8624',compute:'#FF6B2B'
+};
+
+async function runUploadAnalysis(){
+  var btn=document.getElementById('upload-analyze-btn');
+  var icon=document.getElementById('upload-btn-icon');
+  var txt=document.getElementById('upload-btn-txt');
+  var githubUrl=document.getElementById('upload-github-url').value.trim();
+  var budgetRaw=parseFloat(document.getElementById('upload-budget').value)||0;
+  var budgetUsd = _uploadCurrency==='INR' ? Math.round(budgetRaw/84) : budgetRaw;
+
+  if(!_uploadFiles.length && !githubUrl){
+    showNotif('warn','Nothing to analyze','Upload files or enter a GitHub URL first','',3000);
+    return;
+  }
+  btn.disabled=true;icon.textContent='⏳';txt.textContent='Analyzing...';
+  document.getElementById('upload-results').style.display='none';
+  document.getElementById('upload-empty').style.display='none';
+
+  try{
+    var fd=new FormData();
+    _uploadFiles.forEach(function(f){fd.append('files',f);});
+    fd.append('github_url', githubUrl);
+    fd.append('budget_usd', budgetUsd);
+    fd.append('currency', _uploadCurrency);
+    var res=await fetch('/upload/analyze',{method:'POST',body:fd,credentials:'include'});
+    if(!res.ok){
+      var err=await res.json();
+      throw new Error(err.detail||'Analysis failed');
+    }
+    _uploadAnalysisData=await res.json();
+    _renderUploadResults(_uploadAnalysisData);
+  }catch(e){
+    showNotif('error','Analysis failed',e.message,'',5000);
+    document.getElementById('upload-empty').style.display='block';
+  }finally{
+    btn.disabled=false;icon.textContent='🔍';txt.textContent='Analyze & Build Canvas';
+  }
+}
+
+function _renderUploadResults(d){
+  var svcs=d.services||[];
+  var conns_=d.connections||[];
+  document.getElementById('upload-results').style.display='block';
+  document.getElementById('upload-empty').style.display='none';
+
+  // Summary
+  document.getElementById('upload-summary-text').textContent=d.summary||'Analysis complete';
+  var stack=d.tech_stack||[];
+  document.getElementById('upload-tech-stack').textContent=stack.length
+    ?'Tech: '+stack.join(' · ')
+    :'Files analyzed: '+d.files_analyzed;
+
+  // Cost
+  var totalUsd=d.total_monthly_usd||0;
+  var totalInr=d.total_monthly_inr||0;
+  document.getElementById('upload-cost-usd').textContent='$'+totalUsd+'/mo';
+  document.getElementById('upload-cost-inr').textContent='≈ ₹'+totalInr+'/mo';
+  var bsEl=document.getElementById('upload-budget-status');
+  if(d.budget_usd&&d.budget_usd>0){
+    if(d.budget_ok){
+      bsEl.textContent='✅ Within budget ($'+d.budget_usd+')';bsEl.style.color='#4ade80';
+    }else{
+      bsEl.textContent='⚠ Over budget by $'+(totalUsd-d.budget_usd);bsEl.style.color='#f87171';
+    }
+  }else{bsEl.textContent='';}
+
+  // Services grid
+  var grid=document.getElementById('upload-services-grid');
+  grid.innerHTML=svcs.map(function(svc){
+    var grp=svc.group||'compute';
+    var ic=_UPLOAD_SVC_ICONS[grp]||'🔧';
+    var col=_UPLOAD_ICON_COLORS[grp]||'#4B5563';
+    var cost=svc.monthly_usd>0?'<div style="font-size:10px;color:#4ade80;margin-top:2px;font-family:monospace">$'+svc.monthly_usd+'/mo</div>':'';
+    return '<div style="background:#0d0d1a;border:1px solid #1e1e30;border-radius:9px;padding:12px;display:flex;align-items:flex-start;gap:10px">'
+      +'<div style="width:32px;height:32px;border-radius:7px;background:'+col+';display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">'+ic+'</div>'
+      +'<div><div style="font-size:12px;font-weight:700;color:#ddd">'+svc.label+'</div>'
+      +'<div style="font-size:10px;color:#555;margin-top:2px">'+svc.reason+'</div>'
+      +cost+'</div></div>';
+  }).join('');
+
+  // Connections
+  var cw=document.getElementById('upload-connections-wrap');
+  var cl=document.getElementById('upload-connections-list');
+  if(conns_.length){
+    cw.style.display='block';
+    cl.innerHTML=conns_.map(function(c){
+      return '<div style="background:#0a0a18;border:1px solid #1e1e30;border-radius:6px;padding:5px 10px;font-size:11px;color:#888">'
+        +'<span style="color:#a78bfa">'+c.from_label+'</span> → <span style="color:#60a5fa">'+c.to_label+'</span></div>';
+    }).join('');
+  }else{cw.style.display='none';}
+}
+
+function uploadBuildCanvas(){
+  if(!_uploadAnalysisData)return;
+  var svcs=_uploadAnalysisData.services||[];
+  if(!svcs.length){showNotif('warn','No services','No services were detected to add to canvas','',3000);return;}
+
+  showPage('canvas');
+
+  // Place nodes in a grid layout
+  var cols=Math.ceil(Math.sqrt(svcs.length));
+  svcs.forEach(function(svc,i){
+    var col=i%cols, row=Math.floor(i/cols);
+    var cx=160+col*220, cy=120+row*160;
+    var grp=svc.group||'compute';
+    var meta={
+      id:svc.id,
+      label:svc.label,
+      catName:grp.charAt(0).toUpperCase()+grp.slice(1),
+      subName:'',
+      group:grp,
+      catType:'tool'
+    };
+    createNode(meta,cx,cy);
+  });
+
+  // Add connections
+  var conns_=_uploadAnalysisData.connections||[];
+  conns_.forEach(function(conn){
+    var fromNode=Object.values(nodes).find(function(n){return n.meta.label===conn.from_label;});
+    var toNode=Object.values(nodes).find(function(n){return n.meta.label===conn.to_label;});
+    if(fromNode&&toNode){
+      var already=conns.some(function(c){return (c.f===fromNode.id&&c.t===toNode.id)||(c.t===fromNode.id&&c.f===toNode.id);});
+      if(!already) conns.push({f:fromNode.id,t:toNode.id});
+    }
+  });
+
+  drawLines();
+  document.getElementById('hint').style.display='none';
+  updateReadiness();
+  showNotif('ok','Canvas Built!',svcs.length+' services added from your source code','Click any service to configure, then Generate All','5000');
 }
 </script>
 </body>

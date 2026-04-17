@@ -26,3 +26,14 @@ generated/**/crash.log
 
 # Claude settings
 .claude/
+
+# Debug / temp files
+debug_arch_response.txt
+debug_response.txt
+notes
+
+# Generated output
+generated/
+
+# Data directory
+data/
