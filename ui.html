@@ -1300,7 +1300,7 @@ function onDragEnd(e){
 }
 function cleanDrag(){dragging=null;ghost.style.display="none";document.removeEventListener("mousemove",onDragMove);document.removeEventListener("mouseup",onDragEnd);}
 // ── VPC & AZ ──────────────────────────────────────────────────────────────────
-var vpcs={},azs={},vc=0,ac=0;
+var vpcs={},azs={},vc=0,ac=0,vpcConns=[],vpcConnFrom=null;
 function addVPC(){
   var id="vpc"+(++vc);
   var x=80+Math.random()*150,y=80+Math.random()*100;
@@ -1314,8 +1314,12 @@ function renderVPC(id){
   var div=document.createElement("div");
   div.className="vpc-container";div.id=id;
   div.style.cssText="left:"+vpc.x+"px;top:"+vpc.y+"px;width:"+vpc.w+"px;height:"+vpc.h+"px";
-  div.innerHTML='<div class="vpc-header"><div style="font-size:12px">🌐</div><div class="vpc-title">'+vpc.name+'</div><span class="vpc-cidr">'+vpc.cidr+'</span><span class="vpc-del" onclick="delVPC(\''+id+'\')">✕</span></div>';
+  div.innerHTML='<div class="vpc-header"><div style="font-size:12px">🌐</div><div class="vpc-title">'+vpc.name+'</div><span class="vpc-cidr">'+vpc.cidr+'</span><span onclick="event.stopPropagation();startVPCConnect(\''+id+'\')" title="Connect to another VPC (Peering)" style="cursor:pointer;color:#f59e0b;font-size:13px;font-weight:700;padding:0 6px;opacity:0.7;transition:opacity 0.15s" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.7">⇌</span><span class="vpc-del" onclick="delVPC(\''+id+'\')">✕</span></div>';
   var hdr=div.querySelector(".vpc-header");
+  hdr.addEventListener("click",function(e){
+    if(e.target.classList.contains("vpc-del")||e.target.getAttribute('title')==='Connect to another VPC (Peering)')return;
+    if(vpcConnFrom&&vpcConnFrom!==id)vpcClicked(id);
+  });
   var vDrag=null;
   hdr.addEventListener("mousedown",function(e){
     if(e.target.classList.contains("vpc-del"))return;
@@ -1339,7 +1343,27 @@ function renderVPC(id){
   div.appendChild(rh);
   document.getElementById("cnodes").insertBefore(div,document.getElementById("cnodes").firstChild);
 }
-function delVPC(id){var el=document.getElementById(id);if(el)el.remove();delete vpcs[id];}
+function delVPC(id){
+  var el=document.getElementById(id);if(el)el.remove();delete vpcs[id];
+  vpcConns=vpcConns.filter(function(c){return c.f!==id&&c.t!==id;});
+  drawLines();
+}
+function startVPCConnect(id){
+  vpcConnFrom=id;
+  document.querySelectorAll(".vpc-container").forEach(function(v){v.style.outline="";});
+  document.getElementById(id).style.outline="2px solid #f59e0b";
+  showNotif("info","VPC Peering mode","Click another VPC to create a peering connection. Press Esc to cancel.","",0);
+}
+function vpcClicked(id){
+  if(!vpcConnFrom)return;
+  if(vpcConnFrom===id){vpcConnFrom=null;document.querySelectorAll(".vpc-container").forEach(function(v){v.style.outline="";});showNotif("warn","Same VPC","Select a different VPC.",null,3000);return;}
+  for(var i=0;i<vpcConns.length;i++){var c=vpcConns[i];if((c.f===vpcConnFrom&&c.t===id)||(c.f===id&&c.t===vpcConnFrom)){showNotif("warn","Already peered","These VPCs are already connected.",null,3000);vpcConnFrom=null;document.querySelectorAll(".vpc-container").forEach(function(v){v.style.outline="";});return;}}
+  vpcConns.push({f:vpcConnFrom,t:id});
+  document.querySelectorAll(".vpc-container").forEach(function(v){v.style.outline="";});
+  showNotif("ok","VPC Peering Created!",vpcs[vpcConnFrom].name+" ⇌ "+vpcs[id].name,"A VPC peering connection has been established.",4000);
+  vpcConnFrom=null;
+  drawLines();
+}
 function addAZ(){
   var id="az"+(++ac);
   var x=100+Math.random()*150,y=110+Math.random()*80;
@@ -1451,7 +1475,7 @@ function cancelConnect(){
   document.getElementById("cov").classList.remove("show");
 }
 document.addEventListener("keydown",function(e){
-  if(e.key==="Escape"){cancelConnect();showNotif("info","Cancelled","Connection mode cancelled.","",2000);}
+  if(e.key==="Escape"){cancelConnect();if(vpcConnFrom){vpcConnFrom=null;document.querySelectorAll(".vpc-container").forEach(function(v){v.style.outline="";});}showNotif("info","Cancelled","Connection mode cancelled.","",2000);}
   if(e.key==="Delete"&&selId&&!connFrom)delNode(selId);
   if(e.ctrlKey&&e.key==="s"){e.preventDefault();if(currentCanvasId){fetch("/canvas/"+currentCanvasId,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:getCanvasData()})});showNotif("ok","Saved!","Canvas saved with Ctrl+S","",2000);}else{openModal();}}
   if(e.ctrlKey&&e.key==="z")showNotif("warn","Undo","Undo feature coming soon!","",2000);
@@ -1461,8 +1485,30 @@ function drawLines(){
   var svg=document.getElementById("svg-lines");
   svg.innerHTML="";
   var defs=document.createElementNS("http://www.w3.org/2000/svg","defs");
-  defs.innerHTML='<marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#a78bfa"/></marker>';
+  defs.innerHTML='<marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#a78bfa"/></marker>'
+    +'<marker id="arr-vpc" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b"/></marker>';
   svg.appendChild(defs);
+  // Draw VPC peering lines
+  for(var p=0;p<vpcConns.length;p++){
+    (function(c){
+      var a=vpcs[c.f],b=vpcs[c.t];
+      if(!a||!b)return;
+      var ax=a.x+a.w/2,ay=a.y+a.h/2;
+      var bx=b.x+b.w/2,by=b.y+b.h/2;
+      var mx=(ax+bx)/2;
+      var path=document.createElementNS("http://www.w3.org/2000/svg","path");
+      path.setAttribute("d","M"+ax+","+ay+" C"+mx+","+ay+" "+mx+","+by+" "+bx+","+by);
+      path.setAttribute("fill","none");path.setAttribute("stroke","#f59e0b");path.setAttribute("stroke-width","2");
+      path.setAttribute("stroke-dasharray","8 4");path.setAttribute("marker-end","url(#arr-vpc)");path.setAttribute("opacity","0.8");
+      var anim=document.createElementNS("http://www.w3.org/2000/svg","animate");
+      anim.setAttribute("attributeName","stroke-dashoffset");anim.setAttribute("from","0");anim.setAttribute("to","-24");anim.setAttribute("dur","1.5s");anim.setAttribute("repeatCount","indefinite");
+      path.appendChild(anim);svg.appendChild(path);
+      var lx=(ax+bx)/2,ly=(ay+by)/2;
+      var lbl=document.createElementNS("http://www.w3.org/2000/svg","text");
+      lbl.setAttribute("x",lx);lbl.setAttribute("y",ly-8);lbl.setAttribute("text-anchor","middle");lbl.setAttribute("font-size","9");lbl.setAttribute("fill","#f59e0b");lbl.setAttribute("font-family","monospace");lbl.textContent="VPC Peering";
+      svg.appendChild(lbl);
+    })(vpcConns[p]);
+  }
   for(var i=0;i<conns.length;i++){
     (function(c,idx){
       var a=nodes[c.f],b=nodes[c.t];
@@ -1755,7 +1801,7 @@ function clearCanvas(){
   if(!Object.keys(nodes).length&&!Object.keys(vpcs).length&&!Object.keys(azs).length)return;
   if(!confirm("Clear everything from canvas?"))return;
   document.getElementById("cnodes").innerHTML="";
-  conns.length=0;
+  conns.length=0;vpcConns.length=0;
   var k=Object.keys(nodes);for(var i=0;i<k.length;i++)delete nodes[k[i]];
   var v=Object.keys(vpcs);for(var i=0;i<v.length;i++)delete vpcs[v[i]];
   var a=Object.keys(azs);for(var i=0;i<a.length;i++)delete azs[a[i]];
@@ -1834,7 +1880,7 @@ function getCanvasData(){
   var nodeData={};
   var ids=Object.keys(nodes);
   for(var i=0;i<ids.length;i++){var n=nodes[ids[i]];nodeData[ids[i]]={id:n.id,meta:n.meta,x:n.x,y:n.y,config:n.config,w:n.w,h:n.h};}
-  return JSON.stringify({nodes:nodeData,conns:conns,vpcs:vpcs,azs:azs,nc:nc,vc:vc,ac:ac,savedAt:new Date().toISOString()});
+  return JSON.stringify({nodes:nodeData,conns:conns,vpcs:vpcs,azs:azs,nc:nc,vc:vc,ac:ac,vpcConns:vpcConns,savedAt:new Date().toISOString()});
 }
 async function saveCanvas(){
   var name=document.getElementById("canvas-name").value.trim();
@@ -1895,6 +1941,7 @@ async function loadCanvas(id,name){
     if(saved.azs){var ak=Object.keys(saved.azs);for(var i=0;i<ak.length;i++){azs[ak[i]]=saved.azs[ak[i]];renderAZ(ak[i]);}}
     if(saved.nodes){var nk=Object.keys(saved.nodes);for(var i=0;i<nk.length;i++){var nd=saved.nodes[nk[i]];nodes[nk[i]]=nd;createNodeFromSaved(nd);}}
     if(saved.conns){for(var i=0;i<saved.conns.length;i++)conns.push(saved.conns[i]);}
+    if(saved.vpcConns){for(var i=0;i<saved.vpcConns.length;i++)vpcConns.push(saved.vpcConns[i]);}
     currentCanvasId=id;
     document.getElementById("canvas-name").value=name;
     updateSaveInd(name);
@@ -5076,6 +5123,7 @@ async function startGitHubImport() {
         if(saved.azs){var ak=Object.keys(saved.azs);for(var i=0;i<ak.length;i++){azs[ak[i]]=saved.azs[ak[i]];renderAZ(ak[i]);}}
         if(saved.nodes){var nk=Object.keys(saved.nodes);for(var i=0;i<nk.length;i++){var nd=saved.nodes[nk[i]];nodes[nk[i]]=nd;createNodeFromSaved(nd);}}
         if(saved.conns){for(var i=0;i<saved.conns.length;i++) conns.push(saved.conns[i]);}
+        if(saved.vpcConns){for(var i=0;i<saved.vpcConns.length;i++) vpcConns.push(saved.vpcConns[i]);}
         drawLines();
         document.getElementById('hint').style.display = Object.keys(nodes).length===0?'block':'none';
         closeGitHubImport();
