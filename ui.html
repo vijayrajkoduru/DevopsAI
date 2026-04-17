@@ -1327,8 +1327,8 @@ function _grpBg(grp){
 }
 
 var _SB_SECTIONS={
-  aws: {label:"☁  AWS Services",  color:"#FF9900", shown:false},
-  devops:{label:"⚙  DevOps Tools", color:"#a78bfa", shown:false}
+  aws: {label:"☁  AWS Services",  color:"#666", shown:false},
+  devops:{label:"⚙  DevOps Tools", color:"#666", shown:false}
 };
 
 function renderTree(filter){
@@ -1392,26 +1392,20 @@ function renderTree(filter){
 
       for(var vi=0;vi<svcs.length;vi++){
         (function(svc,catName,subName,catType){
-          var grpCol=_grpColor(svc.grp);
           var item=document.createElement("div");
           item.className="svc-row";
-          item.style.borderLeftColor=grpCol;
           var icoWrap=document.createElement("div");
           icoWrap.style.cssText="width:18px;height:18px;border-radius:4px;flex-shrink:0;overflow:hidden";
           icoWrap.appendChild(makeIcoEl(svc.id,18));
           item.appendChild(icoWrap);
           var lbl=document.createElement("span");
           lbl.className="svc-lbl";
-          lbl.style.color=grpCol;
           if(filter&&filter.length>0){var fi2=svc.n.toLowerCase().indexOf(filter.toLowerCase());if(fi2>=0){lbl.innerHTML=svc.n.slice(0,fi2)+'<mark>'+svc.n.slice(fi2,fi2+filter.length)+'</mark>'+svc.n.slice(fi2+filter.length);}else{lbl.textContent=svc.n;}}else{lbl.textContent=svc.n;}
           item.appendChild(lbl);
           var tag=document.createElement("span");
           tag.className="svc-tag";
-          tag.style.cssText="color:"+grpCol+";border-color:rgba("+_hexToRgb(grpCol)+",0.25);background:rgba("+_hexToRgb(grpCol)+",0.08)";
           tag.textContent=svc.tag;
           item.appendChild(tag);
-          item.addEventListener("mouseover",function(){this.style.background=_grpBg(svc.grp);});
-          item.addEventListener("mouseout",function(){this.style.background="";});
           item.addEventListener("mousedown",function(e){
             e.preventDefault();
             startDrag(e,{id:svc.id,label:svc.n,catName:catName,subName:subName,group:svc.grp,catType:catType});
