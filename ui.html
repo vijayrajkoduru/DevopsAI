@@ -346,6 +346,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
       <button class="tbb" onclick="zoomIn()" title="Zoom in">+</button>
       <button class="tbb" onclick="zoomReset()" title="Reset zoom">↺</button>
       <div style="flex:1"></div>
+      <button onclick="openArchitect()" style="padding:5px 14px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;color:#fff;display:flex;align-items:center;gap:6px;flex-shrink:0">🏗 Architect</button>
       <button class="tbb" onclick="validateArchitecture()" style="background:#0a1a0a;border-color:#166534;color:#4ade80">🔍 Validate</button>
       <button class="tbb" id="cost-toggle-btn" onclick="toggleCostBadges()" style="background:#13131f;border-color:#1e1e30;color:#666">💰 Show Costs</button>
       <button class="tbb purple" onclick="genAll()">⚡ Generate All</button>
@@ -4391,6 +4392,886 @@ function buildCanvasFromGitHub() {
     selected.length + ' services placed on canvas from your repo.',
     'Configure each node and click Generate All to regenerate Terraform.', 7000);
 }
+</script>
+
+  }
+}
+</script>
+<!-- ── DEVOPS ARCHITECT AI MODAL ──────────────────────────────────────── -->
+<style>
+#arch-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:9500;display:none;align-items:center;justify-content:center;backdrop-filter:blur(8px)}
+#arch-overlay.open{display:flex}
+#arch-box{background:#0b0b14;border:1px solid #1e1e35;border-radius:20px;width:960px;max-width:98vw;max-height:95vh;overflow-y:auto;padding:0;position:relative;box-shadow:0 32px 80px rgba(0,0,0,0.8)}
+#arch-box::-webkit-scrollbar{width:4px}
+#arch-box::-webkit-scrollbar-thumb{background:#2a2a40;border-radius:2px}
+#arch-box::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#6c47ff,#a78bfa,#4ade80,#fbbf24);border-radius:20px 20px 0 0;z-index:1}
+/* Header */
+.arch-header{padding:28px 32px 20px;border-bottom:1px solid #13131f;background:linear-gradient(180deg,#0f0f20 0%,#0b0b14 100%)}
+.arch-logo{width:44px;height:44px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:20px;margin:0 auto 12px}
+.arch-title{font-size:22px;font-weight:800;color:#fff;text-align:center;margin-bottom:4px;letter-spacing:-0.5px}
+.arch-sub{font-size:12px;color:#444;text-align:center;line-height:1.6}
+/* Tier comparison table */
+.arch-tier-wrap{padding:24px 32px 0}
+.tier-section-label{font-size:10px;color:#444;text-transform:uppercase;letter-spacing:2px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.tier-section-label::before,.tier-section-label::after{content:'';flex:1;height:1px;background:#13131f}
+.tier-cols{display:grid;grid-template-columns:140px 1fr 1fr 1fr;gap:0;border:1px solid #13131f;border-radius:14px;overflow:hidden}
+.tier-col-hdr{padding:18px 16px;text-align:center;border-bottom:1px solid #13131f;cursor:pointer;transition:all 0.2s;position:relative}
+.tier-col-hdr:nth-child(2){background:#0d180f}
+.tier-col-hdr:nth-child(3){background:#130f22}
+.tier-col-hdr:nth-child(4){background:#1a1505}
+.tier-col-hdr.active:nth-child(2){background:#0d2d1a;box-shadow:inset 0 -3px 0 #4ade80}
+.tier-col-hdr.active:nth-child(3){background:#1e1442;box-shadow:inset 0 -3px 0 #a78bfa}
+.tier-col-hdr.active:nth-child(4){background:#221a00;box-shadow:inset 0 -3px 0 #fbbf24}
+.tier-col-hdr:hover{filter:brightness(1.2)}
+.tier-hdr-badge{font-size:9px;font-weight:700;padding:2px 8px;border-radius:10px;display:inline-block;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px}
+.tier-hdr-badge.g{background:#0a2214;color:#4ade80;border:1px solid #166534}
+.tier-hdr-badge.p{background:#160d30;color:#a78bfa;border:1px solid #4c1d95}
+.tier-hdr-badge.y{background:#1c1400;color:#fbbf24;border:1px solid #78350f}
+.tier-hdr-name{font-size:14px;font-weight:800;color:#ddd;margin-bottom:2px}
+.tier-hdr-cost{font-size:12px;font-weight:700}
+.tier-hdr-cost.g{color:#4ade80}.tier-hdr-cost.p{color:#a78bfa}.tier-hdr-cost.y{color:#fbbf24}
+.tier-hdr-sel{width:22px;height:22px;border-radius:50%;margin:8px auto 0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;border:2px solid #1e1e30;color:#333;transition:all 0.2s;background:#0a0a12}
+.tier-col-hdr.active .tier-hdr-sel{border-color:currentColor;color:#000}
+.tier-col-hdr:nth-child(2).active .tier-hdr-sel{background:#4ade80;border-color:#4ade80;color:#000}
+.tier-col-hdr:nth-child(3).active .tier-hdr-sel{background:#a78bfa;border-color:#a78bfa;color:#000}
+.tier-col-hdr:nth-child(4).active .tier-hdr-sel{background:#fbbf24;border-color:#fbbf24;color:#000}
+/* Row label column */
+.tier-row-lbl{padding:10px 14px;background:#090910;border-bottom:1px solid #0e0e18;display:flex;align-items:center;gap:7px;font-size:10px;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:0.8px}
+.tier-row-lbl span{font-size:13px}
+/* Tier cells */
+.tier-cell{padding:10px 14px;border-bottom:1px solid #0e0e18;border-left:1px solid #0e0e18;font-size:11px;color:#777;vertical-align:middle;transition:all 0.2s}
+.tier-cell strong{display:block;font-size:11px;font-weight:700;margin-bottom:1px}
+.tier-cell.g strong{color:#4ade80}.tier-cell.p strong{color:#a78bfa}.tier-cell.y strong{color:#fbbf24}
+.tier-cell small{font-size:9px;color:#3a3a50}
+/* Bottom section */
+.arch-bottom{padding:20px 32px 28px}
+/* Stack overrides */
+.stack-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:16px}
+.stack-item{}
+.stack-lbl{font-size:9px;color:#444;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.stack-sel{width:100%;background:#0a0a12;border:1px solid #1a1a2e;border-radius:6px;padding:6px 8px;color:#888;font-size:11px;outline:none;transition:border-color 0.2s}
+.stack-sel:focus{border-color:#6c47ff;color:#ddd}
+.tier-label{font-size:10px;color:#444;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px}
+.atype-card{background:#0a0a12;border:1px solid #13131f;border-radius:9px;padding:9px 10px;cursor:pointer;transition:all 0.18s;display:flex;flex-direction:column;gap:2px}
+.atype-card:hover{border-color:#6c47ff;background:#13131f}
+.atype-card.selected{border-color:#6c47ff;background:#1e1442;box-shadow:0 0 0 2px rgba(108,71,255,0.2)}
+.atype-card span{font-size:16px;line-height:1;margin-bottom:2px}
+.atype-card strong{font-size:11px;color:#ccc;font-weight:700;line-height:1.2}
+.atype-card small{font-size:9px;color:#3a3a55;line-height:1.3}
+#arch-input{width:100%;background:#060610;border:1px solid #1e1e2e;border-radius:10px;padding:12px 14px;color:#ddd;font-size:13px;outline:none;resize:none;height:72px;font-family:'Segoe UI',Arial,sans-serif;transition:border-color 0.2s;line-height:1.6;margin-bottom:0}
+#arch-input:focus{border-color:#6c47ff;box-shadow:0 0 0 3px rgba(108,71,255,0.08)}
+#arch-input::placeholder{color:#2a2a40}
+
+/* Mode tabs */
+
+/* Pipeline steps */
+.pipeline{display:flex;gap:0;margin-bottom:18px;position:relative}
+.pipeline::before{content:'';position:absolute;top:18px;left:18px;right:18px;height:2px;background:#1a1a2e;z-index:0}
+.pipe-step{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;z-index:1}
+.pipe-ico{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #1a1a2e;background:#0f0f1a;transition:all 0.3s}
+.pipe-ico.active{background:#1e1442;border-color:#6c47ff;box-shadow:0 0 12px rgba(108,71,255,0.4)}
+.pipe-ico.done{background:#0d2d1a;border-color:#166534}
+.pipe-ico.running{background:#1e1442;border-color:#6c47ff;animation:pipePulse 1s ease-in-out infinite}
+@keyframes pipePulse{0%,100%{box-shadow:0 0 6px rgba(108,71,255,0.3)}50%{box-shadow:0 0 18px rgba(108,71,255,0.7)}}
+.pipe-lbl{font-size:9px;color:#555;text-align:center;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+.pipe-lbl.active{color:#a78bfa}
+.pipe-lbl.done{color:#4ade80}
+
+/* Options */
+.arch-opts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.arch-opt{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#0a0a14;border:1px solid #1a1a2e;border-radius:8px;cursor:pointer;transition:all 0.2s}
+.arch-opt:hover{border-color:#2a2a40}
+.arch-opt input[type=checkbox]{width:14px;height:14px;accent-color:#6c47ff;flex-shrink:0}
+.arch-opt-lbl{font-size:11px;color:#888}
+.arch-opt-lbl strong{display:block;color:#ccc;font-size:12px;margin-bottom:1px}
+
+/* Buttons */
+.arch-btns{display:flex;gap:10px;margin-top:14px}
+#arch-canvas-btn{flex:1;padding:12px;background:#1a1a2e;border:1px solid #2a2a40;border-radius:10px;color:#888;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.2s}
+#arch-canvas-btn:hover{border-color:#6c47ff;color:#a78bfa}
+#arch-prod-btn{flex:2;padding:12px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:8px}
+#arch-prod-btn:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(108,71,255,0.4)}
+#arch-prod-btn:disabled,#arch-canvas-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none;box-shadow:none}
+
+/* Log */
+#arch-log{background:#060610;border:1px solid #1a1a2e;border-radius:8px;padding:10px 12px;font-family:monospace;font-size:10px;color:#888;max-height:140px;overflow-y:auto;margin-top:12px;display:none;white-space:pre-wrap;line-height:1.7}
+#arch-log::-webkit-scrollbar{width:3px}
+#arch-log::-webkit-scrollbar-thumb{background:#2a2a40}
+#arch-status{margin-top:8px;font-size:11px;color:#666;text-align:center;min-height:16px}
+#arch-progress-bar{width:0%;height:3px;background:linear-gradient(90deg,#6c47ff,#4ade80);border-radius:2px;transition:width 0.5s;margin-top:6px;display:none}
+#arch-close{position:absolute;top:14px;right:16px;color:#555;cursor:pointer;font-size:18px;line-height:1;transition:color 0.2s}
+#arch-close:hover{color:#fff}
+.spin-sm{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle}
+</style>
+
+<div id="arch-overlay">
+  <div id="arch-box">
+    <div id="arch-close" onclick="closeArchitect()" style="position:absolute;top:16px;right:18px;color:#333;cursor:pointer;font-size:18px;z-index:10;transition:color 0.2s" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#333'">✕</div>
+
+    <!-- HEADER -->
+    <div class="arch-header">
+      <div class="arch-logo">🏗</div>
+      <div class="arch-title">DevOps Architect AI</div>
+      <div class="arch-sub">Select your tier → customize tools → describe your system → get a full production architecture</div>
+    </div>
+
+    <!-- TIER COMPARISON TABLE -->
+    <div class="arch-tier-wrap">
+      <div class="tier-section-label">Choose Architecture Tier</div>
+      <div class="tier-cols">
+
+        <!-- Column Headers -->
+        <div style="background:#090910;border-bottom:1px solid #0e0e18;padding:18px 14px;display:flex;align-items:center;justify-content:center">
+          <span style="font-size:9px;color:#333;text-transform:uppercase;letter-spacing:1.5px;font-weight:700">Category</span>
+        </div>
+        <div class="tier-col-hdr active" id="tier-minimal" onclick="selectTier('minimal')">
+          <div class="tier-hdr-badge g">Minimal</div>
+          <div class="tier-hdr-name">Budget Build</div>
+          <div class="tier-hdr-cost g">~$50–80 / mo</div>
+          <div class="tier-hdr-sel">✓</div>
+        </div>
+        <div class="tier-col-hdr" id="tier-balanced" onclick="selectTier('balanced')">
+          <div class="tier-hdr-badge p">Balanced</div>
+          <div class="tier-hdr-name">Production Ready</div>
+          <div class="tier-hdr-cost p">~$300–500 / mo</div>
+          <div class="tier-hdr-sel">✓</div>
+        </div>
+        <div class="tier-col-hdr" id="tier-enterprise" onclick="selectTier('enterprise')">
+          <div class="tier-hdr-badge y">Enterprise</div>
+          <div class="tier-hdr-name">Full Scale</div>
+          <div class="tier-hdr-cost y">~$2000+ / mo</div>
+          <div class="tier-hdr-sel">✓</div>
+        </div>
+
+        <!-- Compute -->
+        <div class="tier-row-lbl"><span>💻</span>Compute</div>
+        <div class="tier-cell g"><strong>EC2 t3.micro / Spot</strong><small>Single instance, pay per hour</small></div>
+        <div class="tier-cell p"><strong>ECS Fargate</strong><small>Managed containers, pay per task</small></div>
+        <div class="tier-cell y"><strong>EKS + EC2 ASG</strong><small>Kubernetes, HPA autoscaling</small></div>
+
+        <!-- Containers -->
+        <div class="tier-row-lbl"><span>🐳</span>Containers</div>
+        <div class="tier-cell g"><strong>Docker Compose</strong><small>On EC2, no orchestration cost</small></div>
+        <div class="tier-cell p"><strong>Docker + ECS Tasks</strong><small>ECR registry + task definitions</small></div>
+        <div class="tier-cell y"><strong>Kubernetes + Helm</strong><small>Full K8s manifests, rolling deploys</small></div>
+
+        <!-- Database -->
+        <div class="tier-row-lbl"><span>🗄</span>Database</div>
+        <div class="tier-cell g"><strong>PostgreSQL on EC2</strong><small>Self-hosted, manual backups</small></div>
+        <div class="tier-cell p"><strong>RDS Multi-AZ</strong><small>Managed, automated failover</small></div>
+        <div class="tier-cell y"><strong>Aurora Serverless</strong><small>Auto-scale, multi-region ready</small></div>
+
+        <!-- Cache -->
+        <div class="tier-row-lbl"><span>⚡</span>Cache</div>
+        <div class="tier-cell g"><strong>Redis on EC2</strong><small>Self-hosted Docker container</small></div>
+        <div class="tier-cell p"><strong>ElastiCache Redis</strong><small>Managed, single node</small></div>
+        <div class="tier-cell y"><strong>ElastiCache Cluster</strong><small>Cluster mode, multi-AZ replica</small></div>
+
+        <!-- Queue -->
+        <div class="tier-row-lbl"><span>📨</span>Queue</div>
+        <div class="tier-cell g"><strong>RabbitMQ</strong><small>Self-hosted, free</small></div>
+        <div class="tier-cell p"><strong>RabbitMQ / SQS</strong><small>Managed or self-hosted</small></div>
+        <div class="tier-cell y"><strong>SQS + SNS + Kafka</strong><small>Fully managed event streaming</small></div>
+
+        <!-- Networking -->
+        <div class="tier-row-lbl"><span>🌐</span>Networking</div>
+        <div class="tier-cell g"><strong>VPC + Nginx</strong><small>No NAT Gateway (saves $32/mo)</small></div>
+        <div class="tier-cell p"><strong>VPC + ALB + NAT</strong><small>2 AZ, private subnets</small></div>
+        <div class="tier-cell y"><strong>VPC + ALB + CloudFront</strong><small>3 AZ, WAF, Route53</small></div>
+
+        <!-- CI/CD -->
+        <div class="tier-row-lbl"><span>🔄</span>CI/CD</div>
+        <div class="tier-cell g"><strong>GitHub Actions</strong><small>Build → SSH deploy to EC2</small></div>
+        <div class="tier-cell p"><strong>GitHub Actions + ECR</strong><small>Build → push ECR → ECS deploy</small></div>
+        <div class="tier-cell y"><strong>GitHub Actions + ArgoCD</strong><small>GitOps, canary / blue-green</small></div>
+
+        <!-- Monitoring -->
+        <div class="tier-row-lbl"><span>📊</span>Monitoring</div>
+        <div class="tier-cell g"><strong>Prometheus + Grafana</strong><small>Self-hosted stack, free</small></div>
+        <div class="tier-cell p"><strong>Prometheus + Grafana</strong><small>+ Alertmanager + Loki logs</small></div>
+        <div class="tier-cell y"><strong>CloudWatch + Prometheus</strong><small>+ Grafana + Jaeger tracing</small></div>
+
+        <!-- Security -->
+        <div class="tier-row-lbl"><span>🔒</span>Security</div>
+        <div class="tier-cell g"><strong>Vault + IAM Role</strong><small>Self-hosted secrets, free</small></div>
+        <div class="tier-cell p"><strong>Secrets Manager + KMS</strong><small>Managed secrets, ACM SSL</small></div>
+        <div class="tier-cell y"><strong>SM + KMS + WAF + Shield</strong><small>DDoS protection, compliance</small></div>
+
+        <!-- Logging -->
+        <div class="tier-row-lbl"><span>📋</span>Logging</div>
+        <div class="tier-cell g"><strong>Loki + Promtail</strong><small>Self-hosted, free log stack</small></div>
+        <div class="tier-cell p"><strong>Loki + CloudWatch Logs</strong><small>Hybrid log aggregation</small></div>
+        <div class="tier-cell y"><strong>CloudWatch + OpenSearch</strong><small>Kibana dashboards, 90-day retention</small></div>
+
+        <!-- Availability -->
+        <div class="tier-row-lbl"><span>🏥</span>Availability</div>
+        <div class="tier-cell g"><strong>Single AZ</strong><small>No HA — fine for dev/MVP</small></div>
+        <div class="tier-cell p"><strong>2 AZ Active-Active</strong><small>99.95% uptime SLA</small></div>
+        <div class="tier-cell y"><strong>3 AZ + DR Region</strong><small>99.99% uptime, zero-downtime</small></div>
+
+        <!-- IaC -->
+        <div class="tier-row-lbl"><span>📦</span>IaC</div>
+        <div class="tier-cell g"><strong>Terraform</strong><small>All infra as code</small></div>
+        <div class="tier-cell p"><strong>Terraform + Modules</strong><small>Reusable VPC/ECS modules</small></div>
+        <div class="tier-cell y"><strong>Terraform + Helm + Atlantis</strong><small>GitOps infra, PR-based apply</small></div>
+
+        <!-- Backups -->
+        <div class="tier-row-lbl"><span>💾</span>Backups</div>
+        <div class="tier-cell g"><strong>S3 Manual Scripts</strong><small>Cron-based DB dumps to S3</small></div>
+        <div class="tier-cell p"><strong>RDS Automated</strong><small>Daily snapshots, 7-day retention</small></div>
+        <div class="tier-cell y"><strong>RDS + Velero + Cross-region</strong><small>K8s PV backups, 30-day retention</small></div>
+
+      </div>
+    </div>
+
+    <!-- BOTTOM SECTION -->
+    <div class="arch-bottom">
+      <!-- Tool overrides -->
+      <div class="tier-label" style="margin-bottom:10px;margin-top:4px">Override Default Tools</div>
+      <div class="stack-row">
+        <div class="stack-item">
+          <div class="stack-lbl">Monitoring</div>
+          <select class="stack-sel" id="stack-monitoring">
+            <option value="prometheus">Prometheus + Grafana</option>
+            <option value="cloudwatch">AWS CloudWatch</option>
+            <option value="both">Both</option>
+          </select>
+        </div>
+        <div class="stack-item">
+          <div class="stack-lbl">Message Queue</div>
+          <select class="stack-sel" id="stack-queue">
+            <option value="rabbitmq">RabbitMQ (free)</option>
+            <option value="sqs">AWS SQS</option>
+            <option value="kafka">Kafka</option>
+            <option value="nats">NATS</option>
+          </select>
+        </div>
+        <div class="stack-item">
+          <div class="stack-lbl">Containers</div>
+          <select class="stack-sel" id="stack-container">
+            <option value="auto">Auto (tier default)</option>
+            <option value="docker">Docker Compose</option>
+            <option value="ecs">ECS Fargate</option>
+            <option value="eks">EKS Kubernetes</option>
+          </select>
+        </div>
+        <div class="stack-item">
+          <div class="stack-lbl">Ingress / Proxy</div>
+          <select class="stack-sel" id="stack-ingress">
+            <option value="nginx">Nginx (free)</option>
+            <option value="traefik">Traefik (free)</option>
+            <option value="alb">AWS ALB</option>
+            <option value="haproxy">HAProxy (free)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Architecture Type Selector -->
+      <div class="tier-label" style="margin-bottom:12px">Select Architecture Type</div>
+      <div id="arch-type-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:18px">
+
+        <!-- Patterns -->
+        <div style="grid-column:1/-1;font-size:9px;color:#333;text-transform:uppercase;letter-spacing:1.5px;padding:2px 0 4px;border-bottom:1px solid #0e0e18;margin-bottom:2px">Architecture Patterns</div>
+        <div class="atype-card" id="atype-monolith" onclick="selectArchType('monolith')"><span>🏠</span><strong>Monolith</strong><small>Single app on EC2</small></div>
+        <div class="atype-card" id="atype-3tier" onclick="selectArchType('3tier')"><span>📐</span><strong>3-Tier Web App</strong><small>Frontend + API + DB</small></div>
+        <div class="atype-card" id="atype-microservices" onclick="selectArchType('microservices')"><span>⚙</span><strong>Microservices</strong><small>API GW + services + queue</small></div>
+        <div class="atype-card" id="atype-eventdriven" onclick="selectArchType('eventdriven')"><span>⚡</span><strong>Event-Driven</strong><small>Kafka + consumers + DLQ</small></div>
+        <div class="atype-card" id="atype-serverless" onclick="selectArchType('serverless')"><span>☁</span><strong>Serverless</strong><small>Lambda + API GW + DynamoDB</small></div>
+        <div class="atype-card" id="atype-gitops" onclick="selectArchType('gitops')"><span>🔁</span><strong>GitOps</strong><small>ArgoCD + EKS + Helm</small></div>
+        <div class="atype-card" id="atype-multienv" onclick="selectArchType('multienv')"><span>🌍</span><strong>Multi-Environment</strong><small>dev / staging / prod</small></div>
+        <div class="atype-card" id="atype-multiregion" onclick="selectArchType('multiregion')"><span>🗺</span><strong>Multi-Region DR</strong><small>Active-active failover</small></div>
+
+        <!-- Use Cases -->
+        <div style="grid-column:1/-1;font-size:9px;color:#333;text-transform:uppercase;letter-spacing:1.5px;padding:6px 0 4px;border-bottom:1px solid #0e0e18;margin-bottom:2px">Use Cases</div>
+        <div class="atype-card" id="atype-ecommerce" onclick="selectArchType('ecommerce')"><span>🛒</span><strong>E-commerce</strong><small>Cart, payments, orders</small></div>
+        <div class="atype-card" id="atype-saas" onclick="selectArchType('saas')"><span>💼</span><strong>SaaS Platform</strong><small>Multi-tenant + billing</small></div>
+        <div class="atype-card" id="atype-realtime" onclick="selectArchType('realtime')"><span>💬</span><strong>Real-time App</strong><small>WebSocket + pub/sub</small></div>
+        <div class="atype-card" id="atype-ml" onclick="selectArchType('ml')"><span>🤖</span><strong>ML / AI Pipeline</strong><small>Train + serve + monitor</small></div>
+        <div class="atype-card" id="atype-analytics" onclick="selectArchType('analytics')"><span>📊</span><strong>Data Analytics</strong><small>Ingest + ETL + dashboard</small></div>
+        <div class="atype-card" id="atype-media" onclick="selectArchType('media')"><span>🎥</span><strong>Media Streaming</strong><small>Upload + transcode + CDN</small></div>
+        <div class="atype-card" id="atype-iot" onclick="selectArchType('iot')"><span>📡</span><strong>IoT Platform</strong><small>Devices + telemetry + alerts</small></div>
+        <div class="atype-card" id="atype-fintech" onclick="selectArchType('fintech')"><span>🏦</span><strong>Fintech / Banking</strong><small>HA + audit + compliance</small></div>
+        <div class="atype-card" id="atype-healthcare" onclick="selectArchType('healthcare')"><span>🏥</span><strong>Healthcare</strong><small>HIPAA + encryption</small></div>
+
+        <!-- CI/CD Focus -->
+        <div style="grid-column:1/-1;font-size:9px;color:#333;text-transform:uppercase;letter-spacing:1.5px;padding:6px 0 4px;border-bottom:1px solid #0e0e18;margin-bottom:2px">CI/CD Focus</div>
+        <div class="atype-card" id="atype-gha" onclick="selectArchType('gha')"><span>🐙</span><strong>GitHub Actions</strong><small>Test → build → deploy</small></div>
+        <div class="atype-card" id="atype-jenkins" onclick="selectArchType('jenkins')"><span>🔧</span><strong>Jenkins Pipeline</strong><small>Declarative + SonarQube</small></div>
+        <div class="atype-card" id="atype-gitlab" onclick="selectArchType('gitlab')"><span>🦊</span><strong>GitLab CI/CD</strong><small>Full pipeline + registry</small></div>
+        <div class="atype-card" id="atype-argocd" onclick="selectArchType('argocd')"><span>🚀</span><strong>ArgoCD GitOps</strong><small>Auto-sync + rollbacks</small></div>
+
+        <!-- Infra Focus -->
+        <div style="grid-column:1/-1;font-size:9px;color:#333;text-transform:uppercase;letter-spacing:1.5px;padding:6px 0 4px;border-bottom:1px solid #0e0e18;margin-bottom:2px">Infrastructure Focus</div>
+        <div class="atype-card" id="atype-zerodeploy" onclick="selectArchType('zerodeploy')"><span>🔵</span><strong>Zero-Downtime</strong><small>Blue/green + canary</small></div>
+        <div class="atype-card" id="atype-autoscale" onclick="selectArchType('autoscale')"><span>📈</span><strong>Auto-scaling</strong><small>KEDA + HPA + CA</small></div>
+        <div class="atype-card selected" id="atype-custom" onclick="selectArchType('custom')"><span>✏</span><strong>Custom</strong><small>Describe your own</small></div>
+      </div>
+
+      <textarea id="arch-input" placeholder="Describe your system — or select a type above and it will auto-fill..."></textarea>
+
+    <!-- Image upload zone -->
+    <div id="arch-img-zone" onclick="document.getElementById('arch-img-file').click()"
+      ondragover="event.preventDefault();this.style.borderColor='#6c47ff'"
+      ondragleave="this.style.borderColor='#1a1a2e'"
+      ondrop="event.preventDefault();this.style.borderColor='#1a1a2e';handleArchImage(event.dataTransfer.files[0])"
+      style="margin-top:10px;border:1.5px dashed #1a1a2e;border-radius:10px;padding:14px;text-align:center;cursor:pointer;transition:all 0.2s;background:#060610">
+      <div style="font-size:22px;margin-bottom:4px">📷</div>
+      <div style="font-size:12px;color:#555">Upload architecture diagram, whiteboard or screenshot</div>
+      <div style="font-size:10px;color:#333;margin-top:2px">Click or drag & drop — PNG, JPG, WEBP</div>
+    </div>
+    <input type="file" id="arch-img-file" accept="image/*" style="display:none" onchange="handleArchImage(this.files[0])">
+    <div id="arch-img-preview" style="display:none;margin-top:8px;position:relative;text-align:center">
+      <img id="arch-img-thumb" style="max-height:100px;max-width:100%;border-radius:8px;border:1px solid #2a2a40">
+      <div onclick="clearArchImage()" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;background:#f87171;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;color:#fff;font-weight:700">✕</div>
+      <div style="font-size:10px;color:#4ade80;margin-top:4px">✓ Image loaded — AI will analyze and build from it</div>
+    </div>
+
+    <!-- Pipeline steps display -->
+    <div class="pipeline" id="arch-pipeline" style="margin-top:16px">
+      <div class="pipe-step">
+        <div class="pipe-ico" id="pipe-1">🏗</div>
+        <div class="pipe-lbl" id="pipe-1-lbl">Design</div>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-ico" id="pipe-2">📦</div>
+        <div class="pipe-lbl" id="pipe-2-lbl">Terraform</div>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-ico" id="pipe-3">🐳</div>
+        <div class="pipe-lbl" id="pipe-3-lbl">Docker</div>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-ico" id="pipe-4">⚙</div>
+        <div class="pipe-lbl" id="pipe-4-lbl">CI/CD</div>
+      </div>
+      <div class="pipe-step">
+        <div class="pipe-ico" id="pipe-5">🚀</div>
+        <div class="pipe-lbl" id="pipe-5-lbl">Deploy</div>
+      </div>
+    </div>
+
+    <!-- Options -->
+    <div class="arch-opts" id="arch-options">
+      <label class="arch-opt">
+        <input type="checkbox" id="opt-terraform" checked>
+        <div class="arch-opt-lbl"><strong>Terraform Code</strong>Generate IaC for all services</div>
+      </label>
+      <label class="arch-opt">
+        <input type="checkbox" id="opt-docker" checked>
+        <div class="arch-opt-lbl"><strong>Docker Config</strong>Dockerfile & docker-compose</div>
+      </label>
+      <label class="arch-opt">
+        <input type="checkbox" id="opt-cicd" checked>
+        <div class="arch-opt-lbl"><strong>CI/CD Pipeline</strong>GitHub Actions workflows</div>
+      </label>
+      <label class="arch-opt">
+        <input type="checkbox" id="opt-deploy">
+        <div class="arch-opt-lbl"><strong>Auto Deploy to AWS</strong>Run terraform apply</div>
+      </label>
+    </div>
+
+    <div class="arch-btns">
+      <button id="arch-canvas-btn" onclick="buildArchitecture(false)">🏗 Canvas Only</button>
+      <button id="arch-prod-btn" onclick="buildArchitecture(true)">🚀 Full Production Build</button>
+    </div>
+    <div id="arch-progress-bar"></div>
+    <div id="arch-status"></div>
+    <div id="arch-log"></div>
+  </div><!-- end arch-bottom -->
+  </div><!-- end arch-box -->
+</div>
+
+
+<script>
+<script>
+var archImageData = null;
+var archImageType = null;
+
+function handleArchImage(file) {
+  if(!file) return;
+  archImageType = file.type || 'image/jpeg';
+  var r = new FileReader();
+  r.onload = function(e){
+    archImageData = e.target.result.split(',')[1];
+    document.getElementById('arch-img-thumb').src = e.target.result;
+    document.getElementById('arch-img-preview').style.display='block';
+    document.getElementById('arch-img-zone').style.display='none';
+    document.getElementById('arch-input').placeholder='(Optional) Add extra instructions for the AI...';
+  };
+  r.readAsDataURL(file);
+}
+function clearArchImage(){
+  archImageData=null; archImageType=null;
+  document.getElementById('arch-img-preview').style.display='none';
+  document.getElementById('arch-img-zone').style.display='block';
+  document.getElementById('arch-img-file').value='';
+  document.getElementById('arch-input').placeholder='Describe your system in detail...';
+}
+
+function openArchitect() {
+  if (chatOpen) toggleChat();
+  resetPipeline();
+  clearArchImage();
+  document.getElementById('arch-overlay').classList.add('open');
+  setTimeout(function(){ document.getElementById('arch-input').focus(); }, 200);
+}
+function closeArchitect() {
+  document.getElementById('arch-overlay').classList.remove('open');
+}
+function setArchPrompt(text) {
+  document.getElementById('arch-input').value = text;
+  document.getElementById('arch-input').focus();
+}
+function resetPipeline() {
+  [1,2,3,4,5].forEach(function(i){
+    document.getElementById('pipe-'+i).className='pipe-ico';
+    document.getElementById('pipe-'+i+'-lbl').className='pipe-lbl';
+  });
+  document.getElementById('arch-log').style.display='none';
+  document.getElementById('arch-log').textContent='';
+  document.getElementById('arch-status').textContent='';
+  document.getElementById('arch-progress-bar').style.display='none';
+  document.getElementById('arch-progress-bar').style.width='0%';
+}
+function setPipeStep(step, state) {
+  var ico = document.getElementById('pipe-'+step);
+  var lbl = document.getElementById('pipe-'+step+'-lbl');
+  ico.className = 'pipe-ico ' + state;
+  lbl.className = 'pipe-lbl ' + state;
+}
+function archLog(msg) {
+  var log = document.getElementById('arch-log');
+  log.style.display = 'block';
+  log.textContent += msg + '\n';
+  log.scrollTop = log.scrollHeight;
+}
+function setProgress(pct, msg) {
+  var bar = document.getElementById('arch-progress-bar');
+  bar.style.display = 'block';
+  bar.style.width = pct + '%';
+  document.getElementById('arch-status').textContent = msg;
+}
+
+function findSvcMeta(svcId) {
+  if(typeof CATS === 'undefined') return null;
+  for(var i=0;i<CATS.length;i++){
+    var cat=CATS[i];
+    if(!cat.subs) continue;
+    for(var j=0;j<cat.subs.length;j++){
+      var sub=cat.subs[j];
+      if(!sub.svcs) continue;
+      for(var k=0;k<sub.svcs.length;k++){
+        if(sub.svcs[k].id===svcId) return sub.svcs[k];
+      }
+    }
+  }
+  return null;
+}
+
+function autoPlaceArch(arch) {
+  if(!arch || !arch.services || !arch.services.length) return;
+  var placed = {};
+  var total = arch.services.length;
+  var cols = total <= 3 ? total : total <= 8 ? 4 : 5;
+  var startX = 60, startY = 60, colW = 210, rowH = 120;
+  arch.services.forEach(function(svc, i) {
+    var meta = findSvcMeta(svc.id);
+    if (!meta) meta = { id:svc.id, label:svc.name||svc.id, tag:svc.id.split('_')[0], grp:'aws' };
+    else meta = Object.assign({}, meta, { label:svc.name||meta.label });
+    var col = i % cols;
+    var row = Math.floor(i / cols);
+    var x = startX + col * colW + (row % 2 === 1 ? colW/2 : 0);
+    var y = startY + row * rowH;
+    createNode(meta, x, y);
+    placed[i] = 'n' + nc;
+  });
+  setTimeout(function() {
+    if (arch.connections) {
+      arch.connections.forEach(function(conn) {
+        var fId=placed[conn.from], tId=placed[conn.to];
+        if(fId&&tId&&fId!==tId){
+          var exists=conns.some(function(c){return(c.f===fId&&c.t===tId)||(c.f===tId&&c.t===fId);});
+          if(!exists) conns.push({f:fId,t:tId});
+        }
+      });
+      drawLines(); updateCostPanel();
+    }
+  }, 600);
+}
+
+var selectedTier = 'minimal';
+var selectedArchType = 'custom';
+
+var ARCH_TYPE_PROMPTS = {
+  monolith:      {prompt:'Single monolithic web application with Nginx reverse proxy, PostgreSQL database, Redis cache, background jobs and monitoring', extra:'Use ec2_instance as the main compute. Use nginx_proxy, postgres_docker or rds_instance, redis_docker or elasticache_redis. Include s3_bucket for file storage. Add prom_cfg + grafana_app_dash for monitoring. Keep it simple — one server, all-in-one.'},
+  '3tier':       {prompt:'Classic 3-tier web application with load-balanced frontend, auto-scaling backend API and managed database', extra:'Use alb for load balancing. Use ec2_asg or ecs_fargate for backend. Use rds_instance for database. Use elasticache_redis for sessions. Include vpc_main, vpc_subnet_pub, vpc_subnet_priv. Add cw_dashboard or prom_cfg for monitoring.'},
+  microservices: {prompt:'Microservices architecture with API gateway, independent services, message queue, service discovery and distributed tracing', extra:'Use apigw_rest as entry point. Multiple ecs_fargate or k8s_deploy services. Use rabbitmq_broker or sqs_std for inter-service messaging. Add consul_server for service discovery. Include jaeger or otel_collector for tracing. Each service gets its own ecr_repo.'},
+  eventdriven:   {prompt:'Event-driven architecture with message broker, event consumers, dead letter queues, event store and real-time processing', extra:'Use kafka_cluster or rabbitmq_cluster as event backbone. Add kafka_consumer groups. Include sqs_dlq for dead letter queues. Use kinesis_stream for real-time streams. Add es_cluster for event store. Include prom_cfg to monitor consumer lag.'},
+  serverless:    {prompt:'Fully serverless architecture with Lambda functions, API Gateway, DynamoDB, S3 and event triggers — zero server management', extra:'Use lambda_fn as primary compute — NO EC2, NO ECS, NO EKS. Use apigw_rest or apigw_http as entry point. Use dynamodb_table for database. Use s3_bucket for storage. Use sns_topic and sqs_std for triggers. Use eb_bus for event routing. Add cw_log_group for logs.'},
+  gitops:        {prompt:'GitOps infrastructure with ArgoCD, EKS cluster, Helm charts, automated sync from Git and progressive delivery', extra:'Use eks_cluster + eks_nodegroup as platform. Use argocd_app + argocd_project for GitOps. Use helm_chart + helm_values for packaging. Add flux_gitrepo or argocd_img_updater for auto-sync. Include argo_rollout for progressive delivery. Add prom_cfg + grafana_k8s_dash for K8s monitoring.'},
+  multienv:      {prompt:'Multi-environment infrastructure with separate dev, staging and production environments using Terraform workspaces and environment-specific configs', extra:'Use tf_main + tf_vars + tf_backend for IaC. Show dev/staging/prod separation. Use vpc_main per environment. Include atlantis_cfg for PR-based Terraform. Add gha_terraform for CI/CD. Use secrets_mgr per environment.'},
+  multiregion:   {prompt:'Multi-region disaster recovery architecture with active-active setup, Route53 failover, data replication and RTO under 1 minute', extra:'Use r53_zone with failover routing. Use rds_replica for cross-region DB replication. Use s3_replication for object storage. Add cf_dist for global CDN. Include vpc_main in primary and DR region. Use cw_alarm for failover triggers.'},
+  ecommerce:     {prompt:'Full e-commerce platform with product catalog, shopping cart, Stripe payments, user authentication, order management, inventory, email notifications and admin dashboard', extra:'Use alb + ecs_fargate or ec2_asg for app. Use rds_instance for orders/products/users DB. Use elasticache_redis for cart sessions. Use sqs_std for order processing queue. Use sns_topic for email/SMS notifications. Add s3_bucket for product images. Use secrets_mgr for Stripe API keys. Include cf_dist for product image CDN. Add prom_cfg + grafana_app_dash for monitoring.'},
+  saas:          {prompt:'Multi-tenant SaaS platform with tenant isolation, subscription billing, REST API, admin panel, usage analytics, webhooks and rate limiting', extra:'Use apigw_rest for API with rate limiting. Use ecs_fargate for backend. Use rds_instance with tenant schema isolation. Use elasticache_redis for caching + rate limiting. Use sqs_std for async jobs. Add s3_bucket per tenant. Use secrets_mgr for billing API keys. Include cw_dashboard for usage metrics. Add acm_cert + r53_zone for custom domains.'},
+  realtime:      {prompt:'Real-time application with WebSocket connections, pub/sub messaging, live notifications, presence detection, message history and horizontal scaling', extra:'Use apigw_ws for WebSocket API. Use lambda_fn or ecs_fargate for connection handlers. Use elasticache_redis for pub/sub and presence. Use dynamodb_table for message history. Use sns_topic for push notifications. Add kinesis_stream for event streaming. Include prom_cfg to monitor active connections.'},
+  ml:            {prompt:'ML/AI pipeline with data ingestion, feature engineering, model training, model serving API, A/B testing, model monitoring and auto-retraining', extra:'Use s3_bucket for data lake and model artifacts. Use ec2_instance (GPU) or ecs_fargate for training jobs. Use lambda_fn or ecs_fargate for model serving API. Use dynamodb_table for predictions/experiments. Use sqs_std for training job queue. Add prom_cfg + grafana_app_dash for model performance monitoring. Use ecr_repo for model container images.'},
+  analytics:     {prompt:'Data analytics platform with real-time ingestion, batch ETL processing, data warehouse, BI dashboards and scheduled reports', extra:'Use kinesis_stream or kafka_cluster for real-time ingestion. Use s3_bucket as data lake. Use lambda_fn for ETL transformations. Use rds_aurora for data warehouse. Add grafana_app_dash for BI dashboards. Use eb_sched for scheduled reports. Include es_cluster for log analytics. Add prom_cfg for pipeline monitoring.'},
+  media:         {prompt:'Media streaming platform with file upload, video transcoding pipeline, CDN delivery, thumbnail generation, storage management and playback API', extra:'Use s3_bucket for raw and processed media storage. Use lambda_fn for upload triggers and thumbnail generation. Use ecs_fargate for transcoding workers. Use sqs_std for transcoding job queue. Use cf_dist as CDN for media delivery. Add dynamodb_table for media metadata. Use ecr_repo for transcoding container. Include cw_alarm for queue depth monitoring.'},
+  iot:           {prompt:'IoT platform with device management, telemetry ingestion, real-time alerts, time-series data storage, device firmware updates and operational dashboards', extra:'Use kinesis_stream for high-volume telemetry ingestion. Use lambda_fn for stream processing and alerting. Use dynamodb_table for device registry and time-series data. Use s3_bucket for firmware files and long-term storage. Use sns_topic for device alerts. Use sqs_std for command queue to devices. Add prom_cfg + grafana_app_dash for device monitoring dashboards.'},
+  fintech:       {prompt:'Fintech/banking platform with transaction processing, fraud detection, audit logging, encryption, compliance controls, high availability and disaster recovery', extra:'Use rds_aurora Multi-AZ for transaction DB. Use kms_key for data encryption. Use cloudtrail for full audit logging. Use waf_webacl + shield_advanced for DDoS protection. Use secrets_mgr for all credentials. Use vpc_main with private subnets only. Add sqs_fifo for ordered transaction processing. Use prom_cfg + grafana_app_dash + cw_alarm for monitoring. Require 3 AZ minimum.'},
+  healthcare:    {prompt:'Healthcare platform with HIPAA compliance, PHI data encryption, access audit logs, role-based access control, secure API and business continuity', extra:'Use kms_key for PHI encryption at rest and transit. Use cloudtrail + cw_log_group for HIPAA audit logging. Use iam_role + iam_policy for RBAC. Use secrets_mgr for all credentials. Use vpc_main with private subnets, no public DB access. Use acm_cert for TLS everywhere. Add waf_webacl for API protection. Use rds_instance with encryption enabled. Include velero_backup for data backup.'},
+  gha:           {prompt:'Complete GitHub Actions CI/CD pipeline with automated testing, Docker build, container registry push, staging deploy, production deploy with approval gates and rollback', extra:'Use gha_ci for test + lint workflow. Use gha_docker for Docker build and push. Use gha_ecr for ECR registry push. Use gha_cd for deployment workflow with environment protection rules. Use gha_security for security scanning. Use gha_terraform for infrastructure pipeline. Use gha_release for versioning. Add ecr_repo + ecs_fargate or eks_cluster as deploy target.'},
+  jenkins:       {prompt:'Jenkins CI/CD platform with declarative pipelines, SonarQube code quality, Docker build agents, Kubernetes deploy and shared libraries', extra:'Use jenkins_decl for main pipeline. Use jenkins_lib for shared pipeline code. Use jenkins_docker_agent for build agents. Use jenkins_k8s_agent for K8s builds. Use jenkins_sonar for SonarQube quality gates. Deploy to ecs_fargate or eks_cluster. Use ecr_repo for images. Add trivy_scan for container security scanning.'},
+  gitlab:        {prompt:'GitLab CI/CD pipeline with container registry, code quality scanning, Kubernetes integration and multi-stage deployments', extra:'Use gitlab_ci for main pipeline. Use gitlab_docker for Docker build stage. Deploy to ecs_fargate or eks_cluster. Use ecr_repo or harbor_registry for images. Add sonarqube for code quality. Include trivy_scan for security. Use vault_cfg for secrets in pipeline.'},
+  argocd:        {prompt:'ArgoCD GitOps platform with application sync from Git, multi-cluster support, automated rollbacks, progressive delivery and RBAC', extra:'Use argocd_app + argocd_project + argocd_rbac as core. Use argocd_img_updater for automated image updates. Use argo_rollout for blue/green and canary deployments. Use argo_analysis for deployment analysis. Use helm_chart + helm_values for app packaging. Use eks_cluster as target. Add flux_gitrepo as alternative sync source.'},
+  zerodeploy:    {prompt:'Zero-downtime deployment infrastructure with blue/green deployments, canary releases, automated smoke tests, instant rollback and traffic shifting', extra:'Use argo_rollout for blue/green and canary. Use argo_analysis for automated testing. Use alb + alb_target_group for traffic shifting. Use eks_cluster as platform. Use prom_cfg + grafana_app_dash for deployment metrics. Use gha_cd with deployment gates. Include k8s_hpa for scale-up before deploy.'},
+  autoscale:     {prompt:'Auto-scaling infrastructure with event-driven scaling, predictive scaling, cluster autoscaler, horizontal pod autoscaler and cost optimization', extra:'Use keda_scaledobject + keda_trigger for event-driven scaling. Use k8s_hpa for CPU/memory-based scaling. Use eks_cluster with eks_nodegroup autoscaling. Use ec2_asg with scaling policies. Use sqs_std as KEDA scaling trigger. Use prom_cfg to feed custom metrics. Add cw_alarm for scaling alerts. Use ec2_spot for cost optimization.'},
+  custom:        {prompt:'', extra:'Design the architecture based on the user description. Choose the most appropriate services for their use case.'}
+};
+
+function selectArchType(type){
+  selectedArchType = type;
+  document.querySelectorAll('.atype-card').forEach(function(c){c.classList.remove('selected');});
+  var card = document.getElementById('atype-'+type);
+  if(card) card.classList.add('selected');
+  var archInput = document.getElementById('arch-input');
+  if(ARCH_TYPE_PROMPTS[type] && ARCH_TYPE_PROMPTS[type].prompt){
+    archInput.value = ARCH_TYPE_PROMPTS[type].prompt;
+  } else {
+    archInput.value = '';
+    archInput.focus();
+  }
+}
+
+function selectTier(tier){
+  selectedTier = tier;
+  document.querySelectorAll('.tier-col-hdr').forEach(function(c){c.classList.remove('active');});
+  document.getElementById('tier-'+tier).classList.add('active');
+}
+
+var TIER_SYSTEMS = {
+  minimal: `You are an expert DevOps Architect specializing in LOW COST, budget-friendly infrastructure.
+Design a MINIMAL cost architecture using ONLY these services (no EKS, no Aurora, no expensive managed services):
+Compute: ec2_instance, ec2_spot (use t3.micro or t3.small ONLY)
+Containers: docker_file, docker_compose_dev (Docker Compose on EC2 — NO Kubernetes/EKS)
+Database: postgres_docker OR mysql_docker (self-hosted on EC2, NOT RDS)
+Reverse Proxy: nginx_proxy OR traefik_proxy (self-hosted, NOT ALB)
+Network: vpc_main, vpc_subnet_pub, vpc_subnet_priv, vpc_igw, vpc_sg, acm_cert
+Security: vault_docker OR secrets_mgr, iam_role
+CI/CD: gha_ci, gha_cd, gha_docker
+Cache: redis_docker (self-hosted Redis, NOT ElastiCache)
+Backups: s3_bucket (for backups only)
+COST TARGET: $50-80/month total. Justify every service. No NAT Gateway (costs $32/mo — use public subnet).`,
+
+  balanced: `You are an expert DevOps Architect designing a BALANCED production-ready architecture.
+Use managed AWS services where they add real value, self-hosted where cost doesn't justify managed:
+Compute: ecs_fargate, ecs_cluster (NOT EKS — too expensive for balanced tier)
+Database: rds_instance (Multi-AZ), elasticache_redis
+Network: vpc_main, vpc_subnet_pub, vpc_subnet_priv, vpc_igw, vpc_nat, alb, vpc_sg, acm_cert, r53_zone
+Security: secrets_mgr, iam_role, kms_key
+CI/CD: gha_ci, gha_cd, gha_docker, gha_ecr, ecr_repo
+Container Registry: ecr_repo
+Load Balancer: alb, alb_target_group
+COST TARGET: $300-500/month. Use 2 AZs. Include NAT Gateway, RDS Multi-AZ, ECS Fargate.`,
+
+  enterprise: `You are an expert DevOps Architect designing a FULL ENTERPRISE production architecture.
+Use best-in-class AWS services with full redundancy, security, and scalability:
+Compute: eks_cluster, eks_nodegroup, ec2_asg (HPA autoscaling)
+Database: rds_aurora (Multi-AZ), elasticache_redis (cluster mode)
+Network: vpc_main, vpc_subnet_pub, vpc_subnet_priv, vpc_igw, vpc_nat, alb, cf_dist, r53_zone, waf_webacl, acm_cert
+Security: secrets_mgr, iam_role, kms_key, waf_webacl, shield_advanced, cloudtrail
+CI/CD: gha_ci, gha_cd, gha_docker, gha_eks_deploy, argocd_app, ecr_repo
+Monitoring: cw_dashboard, cw_alarm, cw_log_group, prom_cfg, grafana_app_dash
+GitOps: argocd_app, argocd_project
+COST TARGET: $2000+/month. Use 3 AZs, full HA, enterprise security.`
+};
+
+function buildArchSystemPrompt(){
+  var base = TIER_SYSTEMS[selectedTier] || TIER_SYSTEMS.minimal;
+  var monitoring = (document.getElementById('stack-monitoring')||{}).value || 'prometheus';
+  var queue = (document.getElementById('stack-queue')||{}).value || 'rabbitmq';
+  var container = (document.getElementById('stack-container')||{}).value || 'auto';
+  var ingress = (document.getElementById('stack-ingress')||{}).value || 'nginx';
+
+  var overrides = '\n\nTOOL PREFERENCES (must follow these):\n';
+  if(monitoring==='prometheus') overrides += '- Monitoring: Use prom_cfg, grafana_app_dash, prom_alertmgr (NOT CloudWatch dashboard)\n';
+  else if(monitoring==='cloudwatch') overrides += '- Monitoring: Use cw_dashboard, cw_alarm, cw_log_group (NOT Prometheus)\n';
+  else overrides += '- Monitoring: Use BOTH prom_cfg + grafana_app_dash AND cw_dashboard + cw_alarm\n';
+
+  if(queue==='rabbitmq') overrides += '- Message Queue: Use rabbitmq_docker or rabbitmq_k8s (NOT SQS)\n';
+  else if(queue==='sqs') overrides += '- Message Queue: Use sqs_std or sqs_fifo (NOT RabbitMQ)\n';
+  else if(queue==='kafka') overrides += '- Message Queue: Use kafka_cluster (NOT SQS/RabbitMQ)\n';
+  else if(queue==='nats') overrides += '- Message Queue: Use nats_server (lightweight, NOT SQS)\n';
+
+  if(container!=='auto'){
+    if(container==='docker') overrides += '- Containers: Use docker_compose_dev on ec2_instance (NOT ECS/EKS)\n';
+    else if(container==='ecs') overrides += '- Containers: Use ecs_fargate + ecs_cluster (NOT EKS)\n';
+    else if(container==='eks') overrides += '- Containers: Use eks_cluster + eks_nodegroup + k8s_deploy\n';
+  }
+
+  if(ingress==='nginx') overrides += '- Ingress/Proxy: Use nginx_proxy (self-hosted, NOT ALB)\n';
+  else if(ingress==='traefik') overrides += '- Ingress/Proxy: Use traefik_proxy or traefik_k8s\n';
+  else if(ingress==='alb') overrides += '- Ingress/Proxy: Use alb + alb_target_group (AWS managed)\n';
+  else if(ingress==='haproxy') overrides += '- Ingress/Proxy: Use haproxy_cfg (self-hosted)\n';
+
+  var typeExtra = (ARCH_TYPE_PROMPTS[selectedArchType]||{}).extra || '';
+  if(typeExtra) overrides += '\n\nARCHITECTURE TYPE RULES ('+selectedArchType+'):\n'+typeExtra;
+
+  return base + overrides + `
+
+Return ONLY this JSON wrapped in <ARCH></ARCH> — no other text:
+<ARCH>
+{
+  "title": "Architecture Name",
+  "tier": "${selectedTier}",
+  "arch_type": "${selectedArchType}",
+  "estimated_cost": "$XX/mo",
+  "services": [{"id":"vpc_main","name":"Production VPC"}],
+  "connections": [{"from":0,"to":1}]
+}
+</ARCH>
+
+Keep services between 12-20. Always include VPC, at least one security service, and monitoring. Use ONLY service IDs that exist in the provided lists.
+
+CRITICAL RULES:
+- If using eks_nodegroup, you MUST also include eks_cluster BEFORE it (node group depends on cluster)
+- If using eks_cluster, always add eks_nodegroup right after it
+- Never add raw ec2_instance alongside eks_nodegroup — the node group manages EC2 automatically
+- For EKS setups: eks_cluster → eks_nodegroup → k8s_deploy → (optional) helm_chart
+- For Docker on EC2: ec2_instance → docker_compose_prod (NO EKS)`;
+}
+
+var ARCH_SYSTEM = '';
+
+async function buildArchitecture(production) {
+  var prompt = document.getElementById('arch-input').value.trim();
+  var hasImage = !!archImageData;
+
+  if (!prompt && !hasImage) { alert('Please describe your system or upload an image!'); return; }
+
+  var userPrompt = prompt || 'Analyze this architecture diagram and build it on the canvas.';
+  var doTerraform = production && document.getElementById('opt-terraform').checked;
+  var doDocker    = production && document.getElementById('opt-docker').checked;
+  var doCicd      = production && document.getElementById('opt-cicd').checked;
+  var doDeploy    = production && document.getElementById('opt-deploy').checked;
+
+  document.getElementById('arch-canvas-btn').disabled = true;
+  document.getElementById('arch-prod-btn').disabled = true;
+  document.getElementById('arch-prod-btn').innerHTML = '<span class="spin-sm"></span> Building...';
+  document.getElementById('arch-options').style.opacity = '0.5';
+  resetPipeline();
+
+  // ── STEP 1: DESIGN ──────────────────────────────
+  setPipeStep(1,'running');
+  setProgress(10, hasImage ? '🖼 Analyzing image...' : '🤖 Designing architecture...');
+  archLog('━━ Step 1: ' + (hasImage ? 'Analyzing Image' : 'Designing Architecture') + ' ━━');
+
+  // Build message with or without image
+  var userMessage;
+  if(hasImage){
+    userMessage = {
+      role:'user',
+      content:[
+        {type:'image', source:{type:'base64', media_type:archImageType, data:archImageData}},
+        {type:'text', text: userPrompt}
+      ]
+    };
+  } else {
+    userMessage = {role:'user', content: userPrompt};
+  }
+
+  var tierLabel = {minimal:'Budget Build',balanced:'Production Ready',enterprise:'Enterprise'}[selectedTier]||selectedTier;
+  archLog('━━ Type: '+selectedArchType+' | Tier: '+tierLabel+' | Monitoring: '+(document.getElementById('stack-monitoring')||{value:'prometheus'}).value+' | Queue: '+(document.getElementById('stack-queue')||{value:'rabbitmq'}).value+' ━━');
+
+  try {
+    var res = await fetch('/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ system: buildArchSystemPrompt(), messages:[userMessage] })
+    });
+    if(!res.ok){
+      var errData=await res.json().catch(function(){return{detail:'Server error '+res.status};});
+      throw new Error(errData.detail||'Server error '+res.status);
+    }
+    var reader=res.body.getReader(), decoder=new TextDecoder(), fullText='';
+    while(true){
+      var result=await reader.read(); if(result.done)break;
+      var lines=decoder.decode(result.value).split('\n');
+      for(var i=0;i<lines.length;i++){
+        if(!lines[i].startsWith('data: '))continue;
+        var token=lines[i].substring(6);
+        if(token==='[DONE]')break;
+        if(token.startsWith('[ERROR] ')){ throw new Error(token.substring(8)); }
+        fullText+=token.replace(/\\n/g,'\n');
+      }
+    }
+    var archMatch=fullText.match(/<ARCH>([\s\S]*?)<\/ARCH>/);
+    if(!archMatch){
+      setProgress(0,'⚠️ No architecture returned. Try rephrasing.');
+      archLog('ERROR: No <ARCH> block found in response.');
+      document.getElementById('arch-canvas-btn').disabled=false;
+      document.getElementById('arch-prod-btn').disabled=false;
+      document.getElementById('arch-prod-btn').innerHTML='🚀 Full Production Build';
+      document.getElementById('arch-options').style.opacity='1';
+      return;
+    }
+    var arch = JSON.parse(archMatch[1].trim());
+    setPipeStep(1,'done');
+    archLog('✓ Tier: '+(arch.tier||selectedTier)+' | Est. cost: '+(arch.estimated_cost||'see tier'));
+    archLog('✓ Architecture designed: ' + arch.services.length + ' services, ' + (arch.connections||[]).length + ' connections');
+    setProgress(20,'✓ Architecture designed!');
+
+    // Place nodes on canvas
+    closeArchitect();
+    autoPlaceArch(arch);
+    archLog('✓ Canvas populated with nodes and connections');
+
+    // Re-open modal for pipeline steps
+    document.getElementById('arch-overlay').classList.add('open');
+
+    if(typeof chatHistory!=='undefined'){
+      chatHistory.push({role:'assistant', content:'Built **'+arch.title+'** with '+arch.services.length+' services. Services: '+arch.services.map(function(s){return s.name;}).join(', ')});
+    }
+
+    if(!production){
+      showNotif('ok','🏗 '+arch.title, arch.services.length+' services placed, '+(arch.connections||[]).length+' connections.','Right-click any node → Generate Terraform',6000);
+      setProgress(100,'✅ Canvas built!');
+      document.getElementById('arch-canvas-btn').disabled=false;
+      document.getElementById('arch-prod-btn').disabled=false;
+      document.getElementById('arch-prod-btn').innerHTML='🚀 Full Production Build';
+      document.getElementById('arch-options').style.opacity='1';
+      return;
+    }
+
+    // ── STEP 2: TERRAFORM ──────────────────────────
+    if(doTerraform){
+      setPipeStep(2,'running');
+      setProgress(35,'📦 Generating Terraform for all services...');
+      archLog('\n━━ Step 2: Generating Terraform Code ━━');
+      await new Promise(function(r){setTimeout(r,800);});
+      // Trigger genAll() which already exists
+      var nodeIds = Object.keys(nodes);
+      archLog('Generating Terraform for '+nodeIds.length+' services...');
+      for(var ni=0;ni<nodeIds.length;ni++){
+        var nd=nodes[nodeIds[ni]];
+        if(!nd)continue;
+        archLog('  → '+nd.meta.label);
+        try{
+          var ep = nd.meta.catType==='aws' ? '/generate-terraform' : '/generate-config';
+          await fetch(ep,{
+            method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({resource_type:nd.meta.id,config:Object.assign({name:nd.config.name||nd.meta.id,node_id:nodeIds[ni],label:nd.meta.label},nd.config)})
+          });
+        }catch(e){ archLog('    ⚠ skipped: '+e.message); }
+        setProgress(35 + Math.round((ni/nodeIds.length)*20), '📦 Generating Terraform ('+( ni+1)+'/'+nodeIds.length+')...');
+      }
+      setPipeStep(2,'done');
+      archLog('✓ Terraform code generated for all services');
+
+      // ── AUTO: Generate master deploy script (always, detects EKS/K8s/Helm) ──
+      archLog('\n━━ Auto: Generating Master Deploy Script ━━');
+      try {
+        var svcList = nodeIds.map(function(nid){
+          var n = nodes[nid];
+          if(!n) return null;
+          var folder = clean_folder_name_js(n.meta.label) + '-' + nid;
+          return { id: n.meta.id, label: n.meta.label, folder: folder };
+        }).filter(Boolean);
+
+        // detect EKS cluster name from node config
+        var eksNode = Object.values(nodes).find(function(n){ return n.meta.id==='eks_cluster'; });
+        var clusterName = (eksNode && eksNode.config && eksNode.config.name) ? eksNode.config.name : 'my-eks-cluster';
+
+        var sr = await fetch('/generate-setup-script', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ services: svcList, region: 'us-east-1', cluster_name: clusterName })
+        });
+        var sd = await sr.json();
+        if(sd.saved){
+          archLog('✓ Master deploy script saved: generated/deploy-all.sh');
+          if(sd.has_eks)     archLog('  ✓ EKS kubeconfig + kubectl install included');
+          if(sd.has_eks)     archLog('  ✓ AWS Load Balancer Controller (helm) included');
+          if(sd.has_eks)     archLog('  ✓ EBS CSI Driver (helm) included');
+          if(sd.has_monitoring) archLog('  ✓ Prometheus + Grafana stack (helm) included');
+          if(sd.has_argocd)  archLog('  ✓ ArgoCD install included');
+        }
+      } catch(e){ archLog('⚠ Setup script: '+e.message); }
+    } else { setPipeStep(2,'done'); }
+
+    // ── STEP 3: DOCKER ────────────────────────────
+    if(doDocker){
+      setPipeStep(3,'running');
+      setProgress(60,'🐳 Generating Docker configuration...');
+      archLog('\n━━ Step 3: Generating Docker Config ━━');
+      try{
+        var dr=await fetch('/generate',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({prompt:'Generate production Dockerfile and docker-compose.yml for: '+prompt})
+        });
+        var dd=await dr.json();
+        archLog('✓ Docker files generated: '+(dd.saved_files||[]).join(', '));
+      }catch(e){archLog('⚠ Docker generation: '+e.message);}
+      setPipeStep(3,'done');
+    } else { setPipeStep(3,'done'); }
+
+    // ── STEP 4: CI/CD ────────────────────────────
+    if(doCicd){
+      setPipeStep(4,'running');
+      setProgress(75,'⚙ Generating CI/CD pipeline...');
+      archLog('\n━━ Step 4: Generating CI/CD Pipeline ━━');
+      try{
+        var cr=await fetch('/generate',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({prompt:'Generate GitHub Actions CI/CD workflows for Docker build, push to ECR and deploy to EKS for: '+prompt})
+        });
+        var cd=await cr.json();
+        archLog('✓ CI/CD files generated: '+(cd.saved_files||[]).join(', '));
+      }catch(e){archLog('⚠ CI/CD generation: '+e.message);}
+      setPipeStep(4,'done');
+    } else { setPipeStep(4,'done'); }
+
+    // ── STEP 5: DEPLOY ───────────────────────────
+    if(doDeploy){
+      setPipeStep(5,'running');
+      setProgress(88,'🚀 Deploying to AWS...');
+      archLog('\n━━ Step 5: Deploying to AWS ━━');
+      await loadDeployFolders();
+      var sel=document.getElementById('deploy-folder');
+      var folders=[];
+      if(sel){for(var fi=0;fi<sel.options.length;fi++){if(sel.options[fi].value)folders.push(sel.options[fi].value);}}
+      if(folders.length>0){
+        archLog('Deploying '+folders.length+' Terraform folders...');
+        closeArchitect();
+        toggleDeploy();
+        archLog('✓ Deploy panel opened — monitor progress in Deploy tab');
+        deployAll();
+      } else {
+        archLog('⚠ No Terraform folders found — generate code first then deploy manually.');
+      }
+      setPipeStep(5,'done');
+    } else { setPipeStep(5,'done'); }
+
+    setProgress(100,'✅ Production build complete!');
+    archLog('\n✅ All steps complete! Your infrastructure is ready.');
+    showNotif('ok','🚀 Production Build Complete!',
+      arch.services.length+' services • Terraform + Docker + CI/CD generated',
+      doDeploy ? 'Deploying to AWS...' : 'Click Deploy tab to launch to AWS',8000);
+
+  }catch(e){
+    setProgress(0,'⚠️ Error: '+e.message);
+    archLog('ERROR: '+e.message);
+  }
+
+  document.getElementById('arch-canvas-btn').disabled=false;
+  document.getElementById('arch-prod-btn').disabled=false;
+  document.getElementById('arch-prod-btn').innerHTML='🚀 Full Production Build';
+  document.getElementById('arch-options').style.opacity='1';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  var inp = document.getElementById('arch-input');
+  if(inp) inp.addEventListener('keydown', function(e){ if(e.key==='Enter'&&e.ctrlKey) buildArchitecture(true); });
+});
+
 </script>
 </body>
 </html>
