@@ -2142,16 +2142,25 @@ function validateArchitecture(){
   });
   // No monitoring
   if(!groups_by_type.monitoring&&nodeList.length>3)
-    suggestions.push({icon:"💡",title:"No monitoring configured",fix:"Add CloudWatch or Prometheus to monitor your infrastructure. Critical for production."});
+    suggestions.push({icon:"💡",title:"No monitoring configured",fix:"Add CloudWatch or Prometheus to monitor your infrastructure. Critical for production.",add:[{id:"cloudwatch",n:"CloudWatch"},{id:"prometheus",n:"Prometheus"}]});
   // No security layer
   if(!groups_by_type.security&&nodeList.length>2)
-    suggestions.push({icon:"💡",title:"No security services",fix:"Add WAF, Security Groups, or IAM Roles to protect your architecture."});
+    suggestions.push({icon:"💡",title:"No security services",fix:"Add WAF, Security Groups, or IAM Roles to protect your architecture.",add:[{id:"waf",n:"WAF"},{id:"vpc_sg",n:"Security Group"},{id:"iam_role",n:"IAM Role"}]});
   // No CDN for web workloads
   if(groups_by_type.compute&&!groups_by_type.cdn)
-    suggestions.push({icon:"💡",title:"Consider adding CloudFront CDN",fix:"A CDN reduces latency and protects against DDoS for web applications."});
+    suggestions.push({icon:"💡",title:"Consider adding CloudFront CDN",fix:"A CDN reduces latency and protects against DDoS for web applications.",add:[{id:"cloudfront",n:"CloudFront"}]});
   // No backup/storage
   if((groups_by_type.database||groups_by_type.compute)&&!groups_by_type.storage)
-    suggestions.push({icon:"💡",title:"No S3 storage or backup configured",fix:"Add an S3 bucket for backups, static assets, or logs."});
+    suggestions.push({icon:"💡",title:"No S3 storage or backup configured",fix:"Add an S3 bucket for backups, static assets, or logs.",add:[{id:"s3_bucket",n:"S3 Bucket"}]});
+  // No CI/CD
+  if(!groups_by_type.cicd&&nodeList.length>2)
+    suggestions.push({icon:"💡",title:"No CI/CD pipeline configured",fix:"Add a GitHub Actions or CodePipeline to automate deployments.",add:[{id:"github_actions",n:"GitHub Actions"},{id:"codepipeline",n:"CodePipeline"}]});
+  // No load balancer
+  if(groups_by_type.compute&&!nodeList.some(function(n){return (n.meta.id||"").indexOf("alb")>=0||(n.meta.id||"").indexOf("nlb")>=0;}))
+    suggestions.push({icon:"💡",title:"No load balancer configured",fix:"Add an ALB to distribute traffic across your instances.",add:[{id:"alb",n:"ALB"},{id:"nlb",n:"NLB"}]});
+  // No cache
+  if(groups_by_type.database&&!groups_by_type.cache)
+    suggestions.push({icon:"💡",title:"No caching layer",fix:"Add Redis/ElastiCache to reduce database load and improve response time.",add:[{id:"elasticache_redis",n:"Redis"},{id:"elasticache_memcached",n:"Memcached"}]});
 
   // ── BUDGET ESTIMATE ──
   var PRICES={
@@ -2180,9 +2189,22 @@ function validateArchitecture(){
   function renderList(arr){
     if(!arr.length)return '<div style="color:#444;font-size:12px;padding:8px 0">None found ✓</div>';
     return arr.map(function(item){
+      var addBtns='';
+      if(item.add && item.add.length){
+        addBtns='<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">'
+          +item.add.map(function(a){
+            return '<button onclick="addServiceFromValidator(\''+a.id+'\',\''+a.n+'\')" '
+              +'style="background:#1a1a2e;border:1px solid #7c3aed;border-radius:6px;color:#a78bfa;'
+              +'font-size:10px;font-weight:700;padding:3px 9px;cursor:pointer;transition:background 0.15s" '
+              +'onmouseover="this.style.background=\'#2d1b69\'" onmouseout="this.style.background=\'#1a1a2e\'">'
+              +'+ '+a.n+'</button>';
+          }).join('')
+          +'</div>';
+      }
       return '<div style="background:#0a0a18;border:1px solid #1e1e30;border-radius:8px;padding:10px 12px;margin-bottom:8px">'
         +'<div style="font-size:12px;font-weight:700;color:#ddd;margin-bottom:4px">'+item.icon+' '+item.title+'</div>'
         +'<div style="font-size:11px;color:#888;line-height:1.5">💬 '+item.fix+'</div>'
+        +addBtns
         +'</div>';
     }).join("");
   }
@@ -2223,6 +2245,15 @@ function validateArchitecture(){
     +'<button onclick="document.getElementById(\'validate-overlay\').remove()" style="width:100%;margin-top:18px;padding:11px;background:#13131f;border:1px solid #2a2a40;border-radius:8px;color:#888;font-size:13px;cursor:pointer">Close</button>'
     +'</div>';
   document.body.appendChild(overlay);
+}
+function addServiceFromValidator(id, name){
+  var el=document.getElementById("validate-overlay");if(el)el.remove();
+  var meta={id:id,label:name,catName:"AWS",subName:"",group:"compute",catType:"aws"};
+  var cx=220+Math.random()*280, cy=120+Math.random()*200;
+  createNode(meta,cx,cy);
+  document.getElementById("hint").style.display="none";
+  showNotif("ok","Added!",name+" added to canvas.","Select it to configure properties.",3000);
+  validateArchitecture();
 }
 async function genAll(){
   var ids=Object.keys(nodes);
