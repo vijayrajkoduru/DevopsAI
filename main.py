@@ -2368,7 +2368,9 @@ def architect_analyze(req: ArchAnalyzeRequest, request: Request):
     conn_desc = [f"{node_labels.get(c['from'], c['from'])} → {node_labels.get(c['to'], c['to'])}" for c in conn_list]
 
     system = (
-        "You are a senior cloud architect AI. Analyze the given architecture canvas and return ONLY valid JSON — no markdown, no explanation outside the JSON. "
+        "You are a senior cloud architect AI. You MUST respond with ONLY a raw JSON object. "
+        "Do NOT use markdown code fences (no ```json, no ```). Do NOT add any text before or after the JSON. "
+        "Your entire response must start with { and end with }. "
         "Return this exact structure:\n"
         "{\n"
         '  "score": <0-100 architecture quality score>,\n'

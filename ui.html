@@ -5947,10 +5947,24 @@ function _renderArchAgentResult(raw){
   var body=document.getElementById("aap-body");
   var data;
   try{
-    var jsonStart=raw.indexOf("{");var jsonEnd=raw.lastIndexOf("}");
-    data=JSON.parse(raw.slice(jsonStart,jsonEnd+1));
+    // Strip markdown code fences (```json ... ``` or ``` ... ```)
+    var clean=raw.replace(/```json\s*/gi,"").replace(/```\s*/g,"").trim();
+    var jsonStart=clean.indexOf("{");
+    var jsonEnd=clean.lastIndexOf("}");
+    if(jsonStart===-1||jsonEnd===-1)throw new Error("No JSON object found");
+    data=JSON.parse(clean.slice(jsonStart,jsonEnd+1));
   }catch(e){
-    body.innerHTML='<div style="color:#f87171;padding:12px;font-size:11px">Could not parse response. Raw:<br><pre style="font-size:9px;color:#555;white-space:pre-wrap">'+raw.slice(0,400)+'</pre></div>';return;
+    // Retry: try to extract just the JSON block
+    try{
+      var m=raw.match(/\{[\s\S]*\}/);
+      if(m)data=JSON.parse(m[0]);
+      else throw new Error("No JSON");
+    }catch(e2){
+      body.innerHTML='<div style="color:#f87171;padding:12px;font-size:11px;line-height:1.6">'
+        +'<strong>Parse error — retrying...</strong><br>'
+        +'<button onclick="runArchAgent()" style="margin-top:8px;padding:5px 14px;background:#6c47ff;border:none;border-radius:6px;color:#fff;font-size:11px;cursor:pointer">Try Again</button>'
+        +'</div>';return;
+    }
   }
 
   var score=data.score||0;
