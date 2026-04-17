@@ -1344,7 +1344,9 @@ function dropAndAutoConnect(droppedMeta,cx,cy){
       showNotif("ok","Auto-connected!",droppedMeta.label+" → "+connected.join(", "),"",3000);}
   },80);
 }
+var _pendingDupeMeta=null,_pendingDupeX=0,_pendingDupeY=0;
 function showDupeConfirm(meta,cx,cy,existingNames){
+  _pendingDupeMeta=meta;_pendingDupeX=cx;_pendingDupeY=cy;
   var old=document.getElementById("dupe-confirm");if(old)old.remove();
   var d=document.createElement("div");d.id="dupe-confirm";
   d.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;display:flex;align-items:center;justify-content:center";
@@ -1353,12 +1355,17 @@ function showDupeConfirm(meta,cx,cy,existingNames){
     +'<div style="font-size:14px;font-weight:800;color:#fff;margin-bottom:8px">'+meta.label+' already exists</div>'
     +'<div style="font-size:11px;color:#666;margin-bottom:20px;line-height:1.6">Already on canvas: <span style="color:#a78bfa">'+existingNames+'</span><br>Do you want to add another one?</div>'
     +'<div style="display:flex;gap:10px;justify-content:center">'
-    +'<button onclick="document.getElementById(\'dupe-confirm\').remove();dropAndAutoConnect('+JSON.stringify(meta)+','+cx+','+cy+')" '
+    +'<button onclick="confirmAddDupe()" '
     +'style="padding:8px 20px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:700;cursor:pointer">Yes, Add Another</button>'
     +'<button onclick="document.getElementById(\'dupe-confirm\').remove()" '
     +'style="padding:8px 20px;background:#1a1a2e;border:1px solid #2a2a40;border-radius:8px;color:#888;font-size:12px;cursor:pointer">Cancel</button>'
     +'</div></div>';
   document.body.appendChild(d);
+}
+function confirmAddDupe(){
+  document.getElementById("dupe-confirm").remove();
+  if(_pendingDupeMeta)dropAndAutoConnect(_pendingDupeMeta,_pendingDupeX,_pendingDupeY);
+  _pendingDupeMeta=null;
 }
 function cleanDrag(){dragging=null;ghost.style.display="none";document.removeEventListener("mousemove",onDragMove);document.removeEventListener("mouseup",onDragEnd);clearCompatHighlight();}
 
@@ -2294,30 +2301,7 @@ function validateArchitecture(){
   });}
 
   // ── SMART CONNECTION RULES ──
-  // Group-level map: what groups each group should connect to + explanation
-  var GROUP_CONNECT_MAP={
-    compute:   {groups:["database","network","monitoring","security","storage","messaging","api"],        why:"EC2/compute instances connect to databases, load balancers, monitoring, security layers, and storage."},
-    serverless:{groups:["database","storage","network","api","messaging","monitoring","security","streaming"],why:"Lambda functions typically connect to databases, S3, API Gateway, SQS/SNS, and monitoring services."},
-    container: {groups:["network","database","storage","monitoring","registry","k8s","security","messaging"],why:"Containers need a network layer, database, storage, and monitoring to function in production."},
-    k8s:       {groups:["network","database","storage","monitoring","security","messaging","streaming","registry"],why:"Kubernetes workloads connect to ingress, databases, persistent storage, monitoring, and registries."},
-    database:  {groups:["compute","serverless","container","k8s","monitoring","security","cache"],        why:"Databases are accessed by application servers — connect to compute, Lambda, or containers."},
-    cache:     {groups:["compute","serverless","k8s","database"],                                         why:"Cache (Redis/Memcached) sits between your app and database to reduce load."},
-    storage:   {groups:["compute","serverless","container","network","cicd","monitoring"],                 why:"S3/storage is accessed by apps, CI/CD pipelines, and CloudFront for static content."},
-    network:   {groups:["compute","serverless","container","k8s","security","database"],                  why:"Load balancers and network services route traffic to backend compute or containers."},
-    api:       {groups:["serverless","compute","container","k8s","security","database"],                  why:"API Gateway routes requests to Lambda, EC2, or containers — connect to backend services."},
-    security:  {groups:["network","compute","database","serverless","k8s","container","api"],             why:"Security services (IAM, WAF, KMS, Secrets) protect all layers of your architecture."},
-    auth:      {groups:["compute","serverless","network","k8s","api","container"],                        why:"Auth services (Keycloak, Cognito) authenticate users accessing your application layer."},
-    monitoring:{groups:["compute","database","serverless","k8s","container","network","storage","messaging","streaming"],why:"Monitoring scrapes metrics and logs from every service — connect it to all services you want to observe."},
-    messaging: {groups:["compute","serverless","k8s","container","streaming","database","monitoring"],    why:"Message queues (SQS/SNS/RabbitMQ) connect producers and consumers in your architecture."},
-    streaming: {groups:["compute","serverless","k8s","container","database","messaging","monitoring"],    why:"Kafka/Kinesis streams connect data producers to consumers and storage systems."},
-    cicd:      {groups:["compute","container","k8s","storage","iac","gitops","registry","monitoring"],    why:"CI/CD pipelines build, test, and deploy to compute, containers, and registries."},
-    gitops:    {groups:["k8s","container","cicd","iac","registry"],                                       why:"GitOps tools (ArgoCD, Flux) sync with Kubernetes clusters and registries."},
-    iac:       {groups:["compute","database","network","storage","k8s","container","monitoring"],         why:"Terraform/IaC modules provision and manage all infrastructure resources."},
-    cfgmgmt:   {groups:["compute","container","k8s","network"],                                          why:"Ansible/config management configures servers, containers, and Kubernetes nodes."},
-    proxy:     {groups:["network","compute","container","k8s","api","monitoring"],                        why:"Proxies (Traefik, HAProxy) sit in front of your services and route traffic."},
-    mesh:      {groups:["k8s","container","network","monitoring","security"],                             why:"Service meshes (Istio, Linkerd) manage traffic between microservices — connect to your k8s workloads."},
-    registry:  {groups:["container","k8s","cicd"],                                                       why:"Container registries (ECR, Nexus) store images used by containers and deployed by CI/CD."},
-  };
+  // Uses getCompatGroups() as single source of truth for group relationships
 
   // Service-specific overrides (take priority over group map)
   var SVC_CONNECT_OVERRIDES={
@@ -2378,10 +2362,11 @@ function validateArchitecture(){
     for(var k in SVC_CONNECT_OVERRIDES){
       if(mid===k||mid.indexOf(k)>=0||(k.length>4&&k.indexOf(mid)>=0)){rule=SVC_CONNECT_OVERRIDES[k];break;}
     }
-    // 2. Group-level fallback
-    if(!rule&&GROUP_CONNECT_MAP[grp])rule=GROUP_CONNECT_MAP[grp];
-    // 3. Generic catch-all
-    if(!rule)rule={groups:["compute","database","network","monitoring","storage","serverless","k8s","container"],why:nMeta.label+" should be connected to the services it depends on or that depend on it."};
+    // 2. Group-level fallback — use getCompatGroups() as single source of truth
+    if(!rule){
+      var grpTargets=getCompatGroups(nMeta);
+      rule={groups:grpTargets,why:nMeta.label+" should be connected to the services it depends on or that depend on it."};
+    }
 
     // Find candidates already on canvas that are not yet connected
     var candidates=[];
@@ -2752,49 +2737,6 @@ function mergeNodes(keepId, removeId){
   validateArchitecture();
 }
 
-function cleanAllDupes(){
-  var svcMap={};
-  Object.keys(nodes).forEach(function(nid){
-    var key=nodes[nid].meta.id;
-    if(!svcMap[key])svcMap[key]=[];
-    svcMap[key].push(nid);
-  });
-  var renamed=0,removed=0;
-  Object.keys(svcMap).forEach(function(key){
-    var ids=svcMap[key];
-    if(ids.length<2)return;
-    // Sort by connection count descending
-    ids.sort(function(a,b){
-      var ac=conns.filter(function(c){return c.f===a||c.t===a;}).length;
-      var bc=conns.filter(function(c){return c.f===b||c.t===b;}).length;
-      return bc-ac;
-    });
-    ids.forEach(function(nid,i){
-      if(!nodes[nid])return;
-      var connCount=conns.filter(function(c){return c.f===nid||c.t===nid;}).length;
-      var baseName=nodes[nid].meta.label.replace(/\s*\d+$/,"");
-      if(connCount===0&&i>0){
-        // Completely unconnected duplicate — remove it
-        var el=document.getElementById(nid);if(el)el.remove();
-        delete nodes[nid];removed++;
-      } else {
-        // Has connections or is primary — rename to numbered version
-        var newName=baseName+" "+(i+1);
-        nodes[nid].config.name=newName;
-        var titleEl=document.querySelector("#"+nid+" .node-title");
-        if(titleEl)titleEl.textContent=newName;
-        renamed++;
-      }
-    });
-  });
-  if(selId&&!nodes[selId]){selId=null;document.getElementById("props").style.display="none";}
-  drawLines();updateReadiness();
-  if(renamed>0||removed>0){
-    var msg=(renamed>0?renamed+" nodes renamed. ":"")+(removed>0?removed+" empty duplicates removed.":"");
-    showNotif("ok","Cleaned!",msg,"Each duplicate now has a unique name.",4000);
-  } else showNotif("info","No Duplicates","No duplicate services found on canvas.","",3000);
-  validateArchitecture();
-}
 async function genAll(){
   var ids=Object.keys(nodes);
   if(!ids.length){alert("Add services to the canvas first!");return;}
