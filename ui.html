@@ -48,8 +48,10 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
 .cat-row:hover{background:#16161f}
 .cat-arr{font-size:9px;color:#555;width:9px;transition:transform 0.2s;flex-shrink:0}
 .cat-arr.open{transform:rotate(90deg)}
-.cat-lbl{font-size:11px;font-weight:700;color:#aaa;flex:1;letter-spacing:0.3px}
+.cat-lbl{font-size:11px;font-weight:700;color:#ddd;flex:1;letter-spacing:0.3px}
 .cat-cnt{font-size:9px;color:#555;background:#1a1a2e;padding:1px 5px;border-radius:8px}
+.sb-section-hdr{display:flex;align-items:center;gap:8px;padding:10px 9px 5px;font-size:9px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:#444;user-select:none}
+.sb-section-hdr-line{flex:1;height:1px;background:#1a1a2e}
 .cat-body{display:none;background:#0d0d14}
 .cat-body.open{display:block}
 .sub-row{display:flex;align-items:center;gap:4px;padding:4px 9px 4px 22px;cursor:pointer;transition:background 0.15s}
@@ -1324,13 +1326,20 @@ function _grpBg(grp){
   return "rgba("+r+","+g+","+b+",0.06)";
 }
 
+var _SB_SECTIONS={
+  aws: {label:"☁  AWS Services",  color:"#FF9900", shown:false},
+  devops:{label:"⚙  DevOps Tools", color:"#a78bfa", shown:false}
+};
+
 function renderTree(filter){
   filter=(filter||"").toLowerCase();
   var root=document.getElementById("tree");
   root.innerHTML="";
+  // reset section headers
+  Object.keys(_SB_SECTIONS).forEach(function(k){_SB_SECTIONS[k].shown=false;});
+
   for(var ci=0;ci<TREE.length;ci++){
     var cat=TREE[ci];
-    var catColor=_CAT_COLORS[cat.cat]||"#888";
     var filtSubs=[];
     for(var si=0;si<cat.subs.length;si++){
       var sub=cat.subs[si];
@@ -1338,24 +1347,33 @@ function renderTree(filter){
       if(filtSvcs.length>0) filtSubs.push({sub:sub,svcs:filtSvcs});
     }
     if(!filtSubs.length) continue;
+
+    // Inject section divider once per section type
+    var sec=_SB_SECTIONS[cat.cat];
+    if(sec && !sec.shown && !filter){
+      sec.shown=true;
+      var hdr=document.createElement("div");
+      hdr.className="sb-section-hdr";
+      hdr.innerHTML='<span style="color:'+sec.color+'">'+sec.label+'</span><div class="sb-section-hdr-line"></div>';
+      root.appendChild(hdr);
+    }
+
     var total=filtSubs.reduce(function(a,b){return a+b.svcs.length;},0);
     var open=!!filter;
     var catDiv=document.createElement("div");
     catDiv.className="cat-wrap";
     var catRow=document.createElement("div");
     catRow.className="cat-row";
-    catRow.style.borderLeftColor=catColor;
-    catRow.style.borderLeftWidth="3px";
-    catRow.style.borderLeftStyle="solid";
     catRow.innerHTML='<span class="cat-arr'+(open?" open":"")+'" id="ca'+ci+'">▶</span>'
-      +'<span class="cat-lbl" style="color:'+catColor+'">'+cat.name+'</span>'
-      +'<span class="cat-cnt" style="background:rgba('+_hexToRgb(catColor)+',0.15);color:'+catColor+';border:1px solid rgba('+_hexToRgb(catColor)+',0.25)">'+total+'</span>';
+      +'<span class="cat-lbl">'+cat.name+'</span>'
+      +'<span class="cat-cnt">'+total+'</span>';
     (function(idx){catRow.onclick=function(){toggleCat(idx);};})(ci);
     var catBody=document.createElement("div");
     catBody.className="cat-body"+(open?" open":"");
     catBody.id="cb"+ci;
     catDiv.appendChild(catRow);
     catDiv.appendChild(catBody);
+
     for(var fi=0;fi<filtSubs.length;fi++){
       var sub=filtSubs[fi].sub,svcs=filtSubs[fi].svcs;
       var subDiv=document.createElement("div");
@@ -1363,7 +1381,7 @@ function renderTree(filter){
       subRow.className="sub-row";
       var subId="sb"+ci+"_"+fi;
       subRow.innerHTML='<span class="sub-arr'+(open?" open":"")+'" id="sa'+ci+"_"+fi+'">▶</span>'
-        +'<span class="sub-lbl" style="color:rgba('+_hexToRgb(catColor)+',0.7)">'+sub.name+'</span>'
+        +'<span class="sub-lbl">'+sub.name+'</span>'
         +'<span class="sub-cnt">'+svcs.length+'</span>';
       (function(c,f){subRow.onclick=function(){toggleSub(c,f);};})(ci,fi);
       var subBody=document.createElement("div");
@@ -1371,14 +1389,13 @@ function renderTree(filter){
       subBody.id=subId;
       subDiv.appendChild(subRow);
       subDiv.appendChild(subBody);
+
       for(var vi=0;vi<svcs.length;vi++){
         (function(svc,catName,subName,catType){
           var grpCol=_grpColor(svc.grp);
           var item=document.createElement("div");
           item.className="svc-row";
           item.style.borderLeftColor=grpCol;
-          item.style.borderLeftWidth="2px";
-          item.style.borderLeftStyle="solid";
           var icoWrap=document.createElement("div");
           icoWrap.style.cssText="width:18px;height:18px;border-radius:4px;flex-shrink:0;overflow:hidden";
           icoWrap.appendChild(makeIcoEl(svc.id,18));
@@ -1393,7 +1410,6 @@ function renderTree(filter){
           tag.style.cssText="color:"+grpCol+";border-color:rgba("+_hexToRgb(grpCol)+",0.25);background:rgba("+_hexToRgb(grpCol)+",0.08)";
           tag.textContent=svc.tag;
           item.appendChild(tag);
-          // hover highlight
           item.addEventListener("mouseover",function(){this.style.background=_grpBg(svc.grp);});
           item.addEventListener("mouseout",function(){this.style.background="";});
           item.addEventListener("mousedown",function(e){
