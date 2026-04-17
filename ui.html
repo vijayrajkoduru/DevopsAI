@@ -88,6 +88,14 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
 .node.done{border-left:3px solid #4ade80}
 .node.conn-src{border-color:#f59e0b;animation:glow-a 1s ease infinite alternate}
 @keyframes glow-a{from{box-shadow:0 0 4px rgba(245,158,11,0.3)}to{box-shadow:0 0 14px rgba(245,158,11,0.6)}}
+.node.can-connect{border-color:#4ade80!important;animation:glow-green 0.8s ease infinite alternate;z-index:15}
+@keyframes glow-green{from{box-shadow:0 0 6px rgba(74,222,128,0.4),0 0 0 2px rgba(74,222,128,0.15)}to{box-shadow:0 0 18px rgba(74,222,128,0.7),0 0 0 4px rgba(74,222,128,0.25)}}
+.node.suggest-connect{border-color:#60a5fa!important;animation:glow-blue 1s ease infinite alternate}
+@keyframes glow-blue{from{box-shadow:0 0 5px rgba(96,165,250,0.3),0 0 0 2px rgba(96,165,250,0.1)}to{box-shadow:0 0 14px rgba(96,165,250,0.6),0 0 0 3px rgba(96,165,250,0.2)}}
+.node-ring{position:absolute;top:-9px;right:-9px;width:22px;height:22px;pointer-events:none;z-index:20}
+.connect-tip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#0d1f0d;border:1px solid #4ade80;border-radius:5px;padding:2px 7px;font-size:9px;color:#4ade80;white-space:nowrap;z-index:30;pointer-events:none;display:none}
+.node.can-connect .connect-tip{display:block}
+.node.suggest-connect .connect-tip{display:block;background:#0d1428;border-color:#60a5fa;color:#60a5fa}
 .node-head{display:flex;align-items:center;gap:7px;margin-bottom:5px}
 .node-ico{width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700}
 .node-title{font-size:11px;font-weight:700;color:#ddd;line-height:1.2}
@@ -281,6 +289,11 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
   <div class="nav-tab active" id="tab-canvas" onclick="showPage('canvas')">Infrastructure Canvas</div>
   <div class="nav-tab" id="tab-gen" onclick="showPage('gen')">Code Generator</div>
   <div class="topbar-right">
+    <div id="readiness-badge" onclick="validateArchitecture()" title="Enterprise Readiness — click to validate" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#0d0d1a;border:1px solid #1e2a1e;border-radius:20px;cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='#4ade80'" onmouseout="this.style.borderColor='#1e2a1e'">
+      <svg width="20" height="20" viewBox="0 0 20 20" style="flex-shrink:0"><circle cx="10" cy="10" r="8" fill="none" stroke="#1e2a1e" stroke-width="2.5"/><circle id="readiness-arc" cx="10" cy="10" r="8" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-dasharray="0 50.27" stroke-linecap="round" transform="rotate(-90 10 10)" style="transition:stroke-dasharray 0.6s ease,stroke 0.4s"/></svg>
+      <span id="readiness-pct" style="font-size:11px;font-weight:700;color:#4ade80">0%</span>
+      <span id="readiness-label" style="font-size:10px;color:#555">Ready</span>
+    </div>
     <div id="agent-status-badge" class="badge badge-g"><div class="sdot"></div>Agent Online</div>
     <div id="save-indicator" style="font-size:10px;color:#444;padding:2px 8px">Not saved</div>
     <div id="user-menu" style="position:relative">
@@ -1286,6 +1299,7 @@ function startDrag(e,meta){
   ghost.style.top=(e.clientY+8)+"px";
   document.addEventListener("mousemove",onDragMove);
   document.addEventListener("mouseup",onDragEnd);
+  highlightCompatible(meta);
 }
 function onDragMove(e){if(!dragging)return;ghost.style.left=(e.clientX+12)+"px";ghost.style.top=(e.clientY+8)+"px";}
 function onDragEnd(e){
@@ -1300,7 +1314,133 @@ function onDragEnd(e){
   }
   cleanDrag();
 }
-function cleanDrag(){dragging=null;ghost.style.display="none";document.removeEventListener("mousemove",onDragMove);document.removeEventListener("mouseup",onDragEnd);}
+function cleanDrag(){dragging=null;ghost.style.display="none";document.removeEventListener("mousemove",onDragMove);document.removeEventListener("mouseup",onDragEnd);clearCompatHighlight();}
+
+function getCompatGroups(meta){
+  var mid=(meta.id||"").toLowerCase();
+  var grp=(meta.group||meta.grp||"").toLowerCase();
+  var GCM={
+    compute:["database","network","monitoring","security","storage","messaging","api"],
+    serverless:["database","storage","network","api","messaging","monitoring","security","streaming"],
+    container:["network","database","storage","monitoring","registry","k8s","security","messaging"],
+    k8s:["network","database","storage","monitoring","security","messaging","streaming","registry"],
+    database:["compute","serverless","container","k8s","monitoring","security","cache"],
+    cache:["compute","serverless","k8s","database"],
+    storage:["compute","serverless","container","network","cicd","monitoring"],
+    network:["compute","serverless","container","k8s","security","database"],
+    api:["serverless","compute","container","k8s","security","database"],
+    security:["network","compute","database","serverless","k8s","container","api"],
+    auth:["compute","serverless","network","k8s","api","container"],
+    monitoring:["compute","database","serverless","k8s","container","network","storage","messaging","streaming"],
+    messaging:["compute","serverless","k8s","container","streaming","database","monitoring"],
+    streaming:["compute","serverless","k8s","container","database","messaging","monitoring"],
+    cicd:["compute","container","k8s","storage","iac","gitops","registry","monitoring"],
+    gitops:["k8s","container","cicd","iac","registry"],
+    iac:["compute","database","network","storage","k8s","container","monitoring"],
+    cfgmgmt:["compute","container","k8s","network"],
+    proxy:["network","compute","container","k8s","api","monitoring"],
+    mesh:["k8s","container","network","monitoring","security"],
+    registry:["container","k8s","cicd"],
+  };
+  return GCM[grp]||["compute","database","network","monitoring","storage","serverless","k8s","container"];
+}
+
+function highlightCompatible(meta){
+  clearCompatHighlight();
+  var targets=getCompatGroups(meta);
+  Object.keys(nodes).forEach(function(nid){
+    var n=nodes[nid];
+    var ng=(n.meta.group||n.meta.grp||"").toLowerCase();
+    if(targets.indexOf(ng)>=0){
+      var el=document.getElementById(nid);
+      if(el){
+        el.classList.add("can-connect");
+        var tip=el.querySelector(".connect-tip");
+        if(tip)tip.textContent="Can connect";
+      }
+    }
+  });
+}
+
+function showSelectHighlight(nid){
+  clearCompatHighlight();
+  var meta=nodes[nid]?nodes[nid].meta:{};
+  var targets=getCompatGroups(meta);
+  Object.keys(nodes).forEach(function(oid){
+    if(oid===nid)return;
+    var on=nodes[oid];
+    var og=(on.meta.group||on.meta.grp||"").toLowerCase();
+    var alreadyConn=conns.some(function(c){return (c.f===nid&&c.t===oid)||(c.t===nid&&c.f===oid);});
+    if(!alreadyConn&&targets.indexOf(og)>=0){
+      var el=document.getElementById(oid);
+      if(el){
+        el.classList.add("suggest-connect");
+        var tip=el.querySelector(".connect-tip");
+        if(tip)tip.textContent="Click ⊕ to connect";
+      }
+    }
+  });
+}
+
+function clearCompatHighlight(){
+  document.querySelectorAll(".node.can-connect,.node.suggest-connect").forEach(function(el){
+    el.classList.remove("can-connect","suggest-connect");
+  });
+}
+
+// ── READINESS RING: per-node + topbar badge ───────────────────────────────
+function getNodeReadinessPct(nid){
+  var n=nodes[nid];if(!n)return 0;
+  var targets=getCompatGroups(n.meta);
+  if(!targets||!targets.length)return 100;
+  var total=0,connected=0;
+  Object.keys(nodes).forEach(function(oid){
+    if(oid===nid)return;
+    var og=(nodes[oid].meta.group||nodes[oid].meta.grp||"").toLowerCase();
+    if(targets.indexOf(og)<0)return;
+    total++;
+    if(conns.some(function(c){return (c.f===nid&&c.t===oid)||(c.t===nid&&c.f===oid);}))connected++;
+  });
+  if(total===0)return 100;
+  return Math.round((connected/Math.min(total,3))*100); // cap denominator at 3 key connections
+}
+function updateReadiness(){
+  var nids=Object.keys(nodes);
+  if(!nids.length){
+    var rb=document.getElementById("readiness-badge");if(rb)rb.style.display="none";
+    return;
+  }
+  var totalPct=0;
+  nids.forEach(function(nid){
+    var pct=Math.min(getNodeReadinessPct(nid),100);
+    totalPct+=pct;
+    var arc=document.getElementById(nid+"-rarc");
+    var txt=document.getElementById(nid+"-rpct");
+    if(!arc||!txt)return;
+    var circ=50.27;
+    var dash=Math.round((pct/100)*circ);
+    arc.setAttribute("stroke-dasharray",dash+" "+circ);
+    var col=pct>=80?"#4ade80":pct>=50?"#fbbf24":"#f87171";
+    arc.setAttribute("stroke",col);
+    txt.setAttribute("fill",col);
+    txt.textContent=pct+"%";
+  });
+  var avg=Math.round(totalPct/nids.length);
+  var rb=document.getElementById("readiness-badge");
+  var arc2=document.getElementById("readiness-arc");
+  var pctEl=document.getElementById("readiness-pct");
+  var lblEl=document.getElementById("readiness-label");
+  if(!rb||!arc2||!pctEl||!lblEl)return;
+  rb.style.display="flex";
+  var circ=50.27;
+  arc2.setAttribute("stroke-dasharray",Math.round((avg/100)*circ)+" "+circ);
+  var col2=avg>=80?"#4ade80":avg>=50?"#fbbf24":"#f87171";
+  arc2.setAttribute("stroke",col2);
+  pctEl.style.color=col2;pctEl.textContent=avg+"%";
+  var remaining=nids.filter(function(nid){return getNodeReadinessPct(nid)<80;}).length;
+  lblEl.textContent=remaining>0?remaining+" services need connections":"Enterprise Ready";
+  lblEl.style.color=remaining>0?"#fbbf24":"#4ade80";
+}
 // ── VPC & AZ ──────────────────────────────────────────────────────────────────
 var vpcs={},azs={},vc=0,ac=0,vpcConns=[],vpcConnFrom=null;
 var groups={},gc=0;
@@ -1499,6 +1639,13 @@ function createNode(meta,x,y){
   head.appendChild(info);
   var foot=document.createElement("div");foot.className="node-foot";
   foot.innerHTML='<div class="ndot" id="'+id+'-dot"></div><span class="node-st" id="'+id+'-st">Click to configure</span><span class="cost-badge" id="'+id+'-cost">'+getNodeCost(meta.id,{})+'</span><div class="conn-btn" id="'+id+'-cbtn">+</div>';
+  // Readiness ring (top-right corner)
+  var ring=document.createElement("div");ring.className="node-ring";ring.id=id+"-ring";
+  ring.innerHTML='<svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="8" fill="none" stroke="#1e1e30" stroke-width="2.5"/><circle id="'+id+'-rarc" cx="11" cy="11" r="8" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-dasharray="0 50.27" stroke-linecap="round" transform="rotate(-90 11 11)" style="transition:stroke-dasharray 0.5s ease,stroke 0.4s"/><text id="'+id+'-rpct" x="11" y="14.5" text-anchor="middle" font-size="5.5" font-weight="700" fill="#4ade80" font-family="monospace">0%</text></svg>';
+  el.appendChild(ring);
+  // Connect tip label
+  var tip=document.createElement("div");tip.className="connect-tip";
+  el.appendChild(tip);
   el.appendChild(head);el.appendChild(foot);
   el.addEventListener("contextmenu",function(e){showCtx(e,id);});
   el.addEventListener("mousedown",function(e){
@@ -1513,7 +1660,7 @@ function createNode(meta,x,y){
   });
   el.querySelector("#"+id+"-cbtn").addEventListener("click",function(e){e.stopPropagation();startConnect(id);});
   document.getElementById("cnodes").appendChild(el);
-  setTimeout(function(){nodes[id].h=el.offsetHeight;nodes[id].w=el.offsetWidth;drawLines();updateCostPanel();},50);
+  setTimeout(function(){nodes[id].h=el.offsetHeight;nodes[id].w=el.offsetWidth;drawLines();updateCostPanel();updateReadiness();},50);
   selectNode(id);
 }
 var ndDrag=null;
@@ -1558,7 +1705,7 @@ function nodeClicked(id){
     var fId=connFrom, tId=id;
     showConnConfigModal(fId, tId, CONN_CONFIG[cfgKey.key], function(){ drawLines(); if(selId)selectNode(selId); });
   }
-  cancelConnect();drawLines();
+  cancelConnect();drawLines();updateReadiness();
   if(selId)selectNode(selId);
 }
 // Service default ports for auto-suggestion
@@ -1808,6 +1955,7 @@ function selectNode(id){
   document.querySelectorAll(".node").forEach(function(n){n.classList.remove("selected");});
   document.getElementById(id).classList.add("selected");
   selId=id;
+  showSelectHighlight(id);
   var nd=nodes[id],m=nd.meta;
   var icoEl=makeIcoEl(m.id,26);
   document.getElementById("rpico").innerHTML="";document.getElementById("rpico").appendChild(icoEl);
@@ -1857,8 +2005,8 @@ function selectNode(id){
   }
 }
 function upd(id,k,v){nodes[id].config[k]=v;document.getElementById(id+"-dot").className="ndot y";document.getElementById(id+"-st").textContent=nodes[id].config.name||"Configured";document.getElementById(id).classList.add("configured");var cb=document.getElementById(id+"-cost");if(cb)cb.textContent=getNodeCost(nodes[id].meta.id,nodes[id].config);updateCostPanel();}
-function removeConn(a,b){for(var i=conns.length-1;i>=0;i--){if((conns[i].f===a&&conns[i].t===b)||(conns[i].f===b&&conns[i].t===a))conns.splice(i,1);}drawLines();selectNode(selId);}
-function disconnectAll(id){for(var i=conns.length-1;i>=0;i--){if(conns[i].f===id||conns[i].t===id)conns.splice(i,1);}drawLines();if(selId===id)selectNode(id);showNotif("ok","Disconnected","All connections removed from "+nodes[id].meta.label,"",3000);}
+function removeConn(a,b){for(var i=conns.length-1;i>=0;i--){if((conns[i].f===a&&conns[i].t===b)||(conns[i].f===b&&conns[i].t===a))conns.splice(i,1);}drawLines();updateReadiness();selectNode(selId);}
+function disconnectAll(id){for(var i=conns.length-1;i>=0;i--){if(conns[i].f===id||conns[i].t===id)conns.splice(i,1);}drawLines();updateReadiness();if(selId===id)selectNode(id);showNotif("ok","Disconnected","All connections removed from "+nodes[id].meta.label,"",3000);}
 function getFields(type){
   var base=[{k:"name",l:"Name / Identifier",t:"text",p:"my-resource"},{k:"env",l:"Environment",t:"sel",o:["dev","staging","prod"]},{k:"region",l:"AWS Region",t:"sel",o:["us-east-1","us-west-2","eu-west-1","ap-south-1","ap-southeast-1"]}];
   var ex={
@@ -2201,8 +2349,12 @@ function validateArchitecture(){
   }
 
   // ── RULE CHECKS ──
-  // EC2 without VPC
+  // Only real infra services need VPC — never monitoring/security/cicd/iac/storage
+  var VPC_REQUIRED_GROUPS=["compute","serverless","container","k8s","database"];
+  var NO_VPC_NEEDED_GROUPS=["monitoring","security","cicd","gitops","iac","cfgmgmt","registry","auth","mesh"];
   (groups_by_type.compute||[]).forEach(function(n){
+    var grp=(n.meta.group||n.meta.grp||"").toLowerCase();
+    if(NO_VPC_NEEDED_GROUPS.indexOf(grp)>=0)return;
     if(!connectedTo(n.id,"network")&&!hasVPC)
       issues.push({icon:"🔴",title:n.meta.label+" has no VPC or network",fix:"Connect it to a VPC or security group. EC2 without VPC is not deployable.",nodeId:n.id});
   });
@@ -2285,6 +2437,17 @@ function validateArchitecture(){
   // No cache
   if(groups_by_type.database&&!groups_by_type.cache)
     suggestions.push({icon:"💡",title:"No caching layer",fix:"Add Redis/ElastiCache to reduce database load and improve response time.",add:[{id:"elasticache_redis",n:"Redis"},{id:"elasticache_memcached",n:"Memcached"}]});
+
+  // ── DEDUPLICATE: collapse same-title items into one (e.g. 3× Prometheus) ──
+  function dedup(arr){
+    var seen={};
+    return arr.filter(function(item){
+      var key=item.title;
+      if(seen[key])return false;
+      seen[key]=true;return true;
+    });
+  }
+  issues=dedup(issues);warnings=dedup(warnings);
 
   // ── BUDGET ESTIMATE ──
   var PRICES={
@@ -2400,9 +2563,39 @@ function validateArchitecture(){
     +'</div>';
   document.body.appendChild(overlay);
 }
+var SVC_GROUP_LOOKUP={
+  ec2_instance:"compute",ec2_asg:"compute",ec2_spot:"compute",lambda_fn:"serverless",lambda_layer:"serverless",
+  ecs_cluster:"container",ecs_service:"container",ecs_task:"container",ecs_fargate:"container",
+  eks_cluster:"container",eks_nodegroup:"container",
+  rds_instance:"database",rds_aurora:"database",rds_replica:"database",rds_proxy:"database",
+  dynamodb:"database",aurora:"database",mongodb:"database",mysql_docker:"database",postgres_docker:"database",
+  elasticache_redis:"cache",elasticache_memcached:"cache",redis:"cache",
+  s3_bucket:"storage",s3_website:"storage",
+  alb:"network",nlb:"network",alb_target_group:"network",cf_dist:"network",r53_zone:"network",
+  apigw_rest:"api",apigw_http:"api",apigw_ws:"api",
+  iam_role:"security",iam_policy:"security",iam_user:"security",waf_webacl:"security",
+  secrets_mgr:"security",ssm_param:"security",kms_key:"security",acm_cert:"security",
+  cloudwatch:"monitoring",prometheus:"monitoring",grafana:"monitoring",loki:"monitoring",
+  cw_log_group:"monitoring",cw_alarm:"monitoring",cw_dashboard:"monitoring",cloudtrail:"monitoring",
+  sqs_std:"messaging",sqs_fifo:"messaging",sns_topic:"messaging",eb_bus:"messaging",
+  kinesis_stream:"streaming",kinesis_firehose:"streaming",kafka_cluster:"streaming",
+  gha_ci:"cicd",gha_cd:"cicd",jenkins_decl:"cicd",gitlab_ci:"cicd",codepipeline:"cicd",github_actions:"cicd",
+  argocd_app:"gitops",flux_gitrepo:"gitops",
+  tf_main:"iac",ansible_site:"cfgmgmt",
+  ecr_repo:"registry",nexus_repo:"registry",
+  istio_mesh:"mesh",traefik_proxy:"proxy",
+  vpc_nat:"network",vpc_sg:"security",
+};
+function resolveServiceGroup(id){
+  var mid=(id||"").toLowerCase();
+  if(SVC_GROUP_LOOKUP[mid])return SVC_GROUP_LOOKUP[mid];
+  for(var k in SVC_GROUP_LOOKUP){if(mid.indexOf(k)>=0||k.indexOf(mid)>=0)return SVC_GROUP_LOOKUP[k];}
+  return "compute";
+}
 function addServiceFromValidator(id, name){
   var el=document.getElementById("validate-overlay");if(el)el.remove();
-  var meta={id:id,label:name,catName:"AWS",subName:"",group:"compute",catType:"aws"};
+  var grp=resolveServiceGroup(id);
+  var meta={id:id,label:name,catName:"AWS",subName:"",group:grp,catType:"aws"};
   var cx=220+Math.random()*280, cy=120+Math.random()*200;
   createNode(meta,cx,cy);
   document.getElementById("hint").style.display="none";
