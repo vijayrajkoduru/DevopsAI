@@ -2532,6 +2532,83 @@ def architect_analyze(req: ArchAnalyzeRequest, request: Request):
         logger.error(f"Architect analyze error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ── ARCHITECTURE IMAGE ANALYSIS ───────────────────────────────────────────────
+
+class ArchImageRequest(BaseModel):
+    image_base64: str
+    image_mime: str = "image/png"
+
+@app.post("/architect/analyze-image")
+@limiter.limit("10/minute")
+def architect_analyze_image(req: ArchImageRequest, request: Request):
+    require_auth(request)
+
+    system = (
+        "You are a senior cloud architect AI. Analyze the architecture diagram image and extract ALL services visible.\n"
+        "You MUST respond with ONLY a raw JSON object — no markdown, no text before or after.\n"
+        "Return this exact structure:\n"
+        "{\n"
+        '  "score": <0-100>,\n'
+        '  "summary": "<1-2 sentence description of the architecture>",\n'
+        '  "canvas_services": [{"id": "<service_id>", "label": "<Name>", "group": "<group>"}],\n'
+        '  "canvas_connections": [{"from_label": "A", "to_label": "B"}],\n'
+        '  "issues": [{"title": "...", "detail": "..."}],\n'
+        '  "best_practices": ["tip1", "tip2"],\n'
+        '  "remove_conns": [], "add_conns": [], "add_services": [], "remove_services": []\n'
+        "}\n\n"
+        "Service IDs: ec2_instance, ec2_asg, alb, nlb, vpc_main, vpc_igw, vpc_nat, vpc_sg, cf_dist, "
+        "r53_zone, acm_cert, waf_webacl, shield_advanced, s3_bucket, rds_instance, rds_aurora, "
+        "dynamodb_table, elasticache_redis, lambda_fn, ecs_cluster, ecs_fargate, eks_cluster, "
+        "sqs_std, sns_topic, eb_bus, kinesis_stream, cloudwatch, cw_alarm, cw_dashboard, "
+        "iam_role, iam_policy, secrets_mgr, kms_key, ssm_param, ecr_repo, apigw_rest, apigw_http, "
+        "codepipeline, gha_ci, gha_cd, prom_cfg, grafana_ds, loki_cfg, alertmanager, "
+        "tf_main, ansible_site, jenkins_decl, argocd_app, docker_file, docker_compose_prod, "
+        "k8s_deploy, k8s_ingress, helm_chart, redis_standalone, postgres_docker, mysql_docker, "
+        "mongo_docker, rabbitmq_broker, kafka_cluster, nginx_proxy, vault_cfg.\n"
+        "Groups: compute, serverless, container, k8s, database, cache, storage, network, api, "
+        "security, monitoring, messaging, streaming, cicd, gitops, iac, registry, proxy."
+    )
+
+    try:
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=system,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": req.image_mime,
+                            "data": req.image_base64
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": "Analyze this architecture diagram. Extract every service/component visible, their connections, and any architectural issues. Return the JSON as specified."
+                    }
+                ]
+            }]
+        )
+        raw = msg.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r'^```[a-z]*\s*', '', raw, flags=re.IGNORECASE)
+            raw = re.sub(r'```\s*$', '', raw).strip()
+        j_start = raw.find("{")
+        j_end   = raw.rfind("}")
+        if j_start == -1 or j_end == -1:
+            raise HTTPException(status_code=500, detail="No JSON in response")
+        data = json.loads(_repair_json_strings(raw[j_start:j_end+1]))
+        return data
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"JSON parse error: {str(e)}")
+    except Exception as e:
+        logger.error(f"Image analyze error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── GITHUB IMPORT → CANVAS ────────────────────────────────────────────────────
 
 class GitHubImportRequest(BaseModel):

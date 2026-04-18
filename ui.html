@@ -2071,7 +2071,19 @@ function cancelConnect(){
   document.getElementById("cov").classList.remove("show");
 }
 document.addEventListener("keydown",function(e){
-  if(e.key==="Escape"){cancelConnect();if(vpcConnFrom){vpcConnFrom=null;document.querySelectorAll(".vpc-container").forEach(function(v){v.style.outline="";});}showNotif("info","Cancelled","Connection mode cancelled.","",2000);}
+  if(e.key==="Escape"){
+    // Close all panels/modals in priority order
+    var closed=false;
+    if(document.getElementById("validate-overlay")){document.getElementById("validate-overlay").remove();closed=true;}
+    if(document.getElementById("settings-modal")&&document.getElementById("settings-modal").style.display!=="none"){closeSettings();closed=true;}
+    if(document.getElementById("gh-modal")&&document.getElementById("gh-modal").style.display!=="none"){closeGitHubPush();closed=true;}
+    if(document.getElementById("gh-import-modal")&&document.getElementById("gh-import-modal").classList.contains("open")){closeGitHubImport();closed=true;}
+    if(document.getElementById("req-modal")&&document.getElementById("req-modal").style.display!=="none"){closeReqModal();closed=true;}
+    if(document.getElementById("group-modal")&&document.getElementById("group-modal").style.display!=="none"){document.getElementById("group-modal").style.display="none";closed=true;}
+    if(_aapOpen){toggleArchAgent();closed=true;}
+    if(document.getElementById("deploy-panel")&&document.getElementById("deploy-panel").classList.contains("open")){toggleDeploy();closed=true;}
+    if(!closed){cancelConnect();if(vpcConnFrom){vpcConnFrom=null;document.querySelectorAll(".vpc-container").forEach(function(v){v.style.outline="";});}}
+  }
   if(e.key==="Delete"&&selId&&!connFrom)delNode(selId);
   if(e.ctrlKey&&e.key==="s"){e.preventDefault();if(currentCanvasId){fetch("/canvas/"+currentCanvasId,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:getCanvasData()})});showNotif("ok","Saved!","Canvas saved with Ctrl+S","",2000);}else{openModal();}}
   if(e.ctrlKey&&e.key==="z")showNotif("warn","Undo","Undo feature coming soon!","",2000);
@@ -6034,10 +6046,32 @@ document.addEventListener('DOMContentLoaded', function() {
       <div style="font-size:12px;margin-bottom:6px;color:#666">Drop services on the canvas then click Analyze to get AI architectural review and auto-fixes.</div>
     </div>
   </div>
-  <div class="aap-foot">
-    <button onclick="runArchAgent()" id="aap-analyze-btn" style="width:100%;padding:10px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:9px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px">
-      <span id="aap-btn-ico">⚡</span> <span id="aap-btn-lbl">Analyze Architecture</span>
-    </button>
+  <div class="aap-foot" style="display:flex;flex-direction:column;gap:8px">
+    <!-- Mode toggle -->
+    <div style="display:flex;background:#13131f;border:1px solid #2a2a40;border-radius:8px;overflow:hidden">
+      <button id="aap-mode-canvas" onclick="setAapMode('canvas')" style="flex:1;padding:7px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;color:#fff;font-size:11px;font-weight:700;cursor:pointer">⚡ Canvas Analyze</button>
+      <button id="aap-mode-image" onclick="setAapMode('image')" style="flex:1;padding:7px;background:none;border:none;color:#555;font-size:11px;font-weight:700;cursor:pointer">🖼 Image Analyze</button>
+    </div>
+    <!-- Canvas mode -->
+    <div id="aap-canvas-mode">
+      <button onclick="runArchAgent()" id="aap-analyze-btn" style="width:100%;padding:10px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:9px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px">
+        <span id="aap-btn-ico">⚡</span> <span id="aap-btn-lbl">Analyze Architecture</span>
+      </button>
+    </div>
+    <!-- Image mode -->
+    <div id="aap-image-mode" style="display:none">
+      <div id="aap-img-drop" onclick="document.getElementById('aap-img-input').click()"
+        style="border:2px dashed #2a2a40;border-radius:8px;padding:14px;text-align:center;cursor:pointer;margin-bottom:8px;transition:all 0.2s"
+        ondragover="event.preventDefault();this.style.borderColor='#6c47ff'" ondragleave="this.style.borderColor='#2a2a40'"
+        ondrop="aapImageDrop(event)">
+        <div id="aap-img-preview" style="display:none;margin-bottom:6px"><img id="aap-img-thumb" style="max-height:80px;max-width:100%;border-radius:6px;object-fit:contain"></div>
+        <div id="aap-img-hint" style="font-size:11px;color:#555">📷 Drop architecture image or click to upload<br><span style="font-size:10px;color:#444">PNG, JPG, JPEG supported</span></div>
+      </div>
+      <input type="file" id="aap-img-input" accept="image/png,image/jpeg,image/jpg,image/webp" style="display:none" onchange="aapImageSelect(this)">
+      <button onclick="runArchAgentImage()" id="aap-img-analyze-btn" style="width:100%;padding:10px;background:linear-gradient(135deg,#0e7490,#0891b2);border:none;border-radius:9px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px">
+        <span id="aap-img-btn-ico">🖼</span> <span id="aap-img-btn-lbl">Analyze Image & Build Canvas</span>
+      </button>
+    </div>
   </div>
 </div>
 
@@ -6047,6 +6081,94 @@ function toggleArchAgent(){
   _aapOpen=!_aapOpen;
   document.getElementById("arch-agent-panel").classList.toggle("open",_aapOpen);
 }
+var _aapMode='canvas', _aapImageBase64=null, _aapImageMime=null;
+function setAapMode(m){
+  _aapMode=m;
+  document.getElementById('aap-canvas-mode').style.display=m==='canvas'?'':'none';
+  document.getElementById('aap-image-mode').style.display=m==='image'?'':'none';
+  document.getElementById('aap-mode-canvas').style.background=m==='canvas'?'linear-gradient(135deg,#6c47ff,#8b5cf6)':'none';
+  document.getElementById('aap-mode-canvas').style.color=m==='canvas'?'#fff':'#555';
+  document.getElementById('aap-mode-image').style.background=m==='image'?'linear-gradient(135deg,#0e7490,#0891b2)':'none';
+  document.getElementById('aap-mode-image').style.color=m==='image'?'#fff':'#555';
+}
+function aapImageSelect(input){
+  var f=input.files[0]; if(!f) return;
+  _aapImageMime=f.type;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    _aapImageBase64=e.target.result.split(',')[1];
+    document.getElementById('aap-img-thumb').src=e.target.result;
+    document.getElementById('aap-img-preview').style.display='block';
+    document.getElementById('aap-img-hint').textContent='✓ '+f.name+' — ready to analyze';
+    document.getElementById('aap-img-hint').style.color='#4ade80';
+  };
+  reader.readAsDataURL(f);
+}
+function aapImageDrop(e){
+  e.preventDefault();
+  document.getElementById('aap-img-drop').style.borderColor='#2a2a40';
+  var f=e.dataTransfer.files[0]; if(!f) return;
+  var fakeInput={files:[f]};aapImageSelect(fakeInput);
+}
+async function runArchAgentImage(){
+  if(!_aapImageBase64){showNotif('warn','No image','Upload an architecture image first','',3000);return;}
+  var btn=document.getElementById('aap-img-analyze-btn');
+  var ico=document.getElementById('aap-img-btn-ico');
+  var lbl=document.getElementById('aap-img-btn-lbl');
+  btn.disabled=true;ico.textContent='⏳';lbl.textContent='Analyzing image...';
+  var body2=document.getElementById('aap-body');
+  body2.innerHTML='<div style="padding:20px;text-align:center;color:#555"><div style="font-size:24px;margin-bottom:8px">🖼️</div><div style="font-size:11px">Reading your architecture diagram...</div></div>';
+  try{
+    var res=await fetch('/architect/analyze-image',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'include',
+      body:JSON.stringify({image_base64:_aapImageBase64,image_mime:_aapImageMime||'image/png'})
+    });
+    if(!res.ok){var e2=await res.json();throw new Error(e2.detail||'Failed');}
+    var data=await res.json();
+    window._aapData=data;_lastArchData=data;
+    // Build canvas from image analysis
+    if(data.canvas_services&&data.canvas_services.length){
+      var cols=Math.ceil(Math.sqrt(data.canvas_services.length));
+      data.canvas_services.forEach(function(svc,i){
+        var col=i%cols,row=Math.floor(i/cols);
+        var cx=180+col*210,cy=120+row*150;
+        var grp=svc.group||'compute';
+        createNode({id:svc.id,label:svc.label,catName:grp,subName:'',group:grp,catType:'aws'},cx,cy);
+      });
+      if(data.canvas_connections){
+        data.canvas_connections.forEach(function(c){
+          var fn=Object.values(nodes).find(function(n){return n.meta.label===c.from_label;});
+          var tn=Object.values(nodes).find(function(n){return n.meta.label===c.to_label;});
+          if(fn&&tn&&!conns.some(function(x){return (x.f===fn.id&&x.t===tn.id)||(x.t===fn.id&&x.f===tn.id);}))
+            conns.push({f:fn.id,t:tn.id});
+        });
+        drawLines();
+      }
+      document.getElementById('hint').style.display='none';
+      updateReadiness();
+      showNotif('ok','Canvas Built!',data.canvas_services.length+' services from image','Review and configure each service','5000');
+    }
+    _renderArchAgentResult(data);
+  }catch(err){
+    body2.innerHTML='<div style="padding:16px;color:#f87171;font-size:12px">Error: '+err.message+'</div>';
+  }finally{
+    btn.disabled=false;ico.textContent='🖼';lbl.textContent='Analyze Image & Build Canvas';
+  }
+}
+
+// Close arch agent when clicking outside it
+document.addEventListener("mousedown",function(e){
+  var panel=document.getElementById("arch-agent-panel");
+  if(_aapOpen && panel && !panel.contains(e.target)){
+    var archBtn=document.querySelector('button[onclick="openArchitect()"]');
+    if(archBtn && archBtn.contains(e.target)) return;
+    toggleArchAgent();
+  }
+});
+// gh-modal click outside
+document.getElementById("gh-modal") && document.getElementById("gh-modal").addEventListener("click",function(e){if(e.target===this)closeGitHubPush();});
 
 async function runArchAgent(){
   var nids=Object.keys(nodes);
