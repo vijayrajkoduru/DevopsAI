@@ -1420,6 +1420,10 @@ def _auto_import_existing(full_path: str, error_output: str, failed_cmd: list, e
         (r'aws_apigatewayv2_api\.\w+',
          r'ConflictException|already exists',
          r'name\s*=\s*"([^"]+)"'),
+        # API GW API Mapping
+        (r'aws_apigatewayv2_api_mapping\.\w+',
+         r'ApiMapping key already exists',
+         r'domain_name\s*=\s*"([^"]+)"'),
     ]
 
     # Resource type → boto3 import ID resolver
@@ -1436,6 +1440,7 @@ def _auto_import_existing(full_path: str, error_output: str, failed_cmd: list, e
         "aws_elasticache_cluster":            lambda name, env: name,
         "aws_elasticache_replication_group":  lambda name, env: name,
         "aws_apigatewayv2_api":               lambda name, env: _resolve_apigw2_id(name, env),
+        "aws_apigatewayv2_api_mapping":       lambda name, env: _resolve_apigw2_mapping_id(name, env),
     }
 
     # Read main.tf once
@@ -1555,6 +1560,22 @@ def _resolve_apigw2_id(name: str, env: dict) -> str:
     except Exception:
         pass
     return name
+
+
+def _resolve_apigw2_mapping_id(domain_name: str, env: dict) -> str:
+    """Returns 'domain_name/mapping_id' for aws_apigatewayv2_api_mapping import."""
+    try:
+        import boto3
+        client = boto3.client("apigatewayv2",
+            aws_access_key_id=env.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=env.get("AWS_SECRET_ACCESS_KEY"),
+            region_name=env.get("AWS_DEFAULT_REGION", "us-east-1"))
+        mappings = client.get_api_mappings(DomainName=domain_name).get("Items", [])
+        if mappings:
+            return f"{domain_name}/{mappings[0]['ApiMappingId']}"
+    except Exception:
+        pass
+    return domain_name
 
 
 def run_terraform_streaming(full_path: str, commands: list, aws_creds: dict = None):
@@ -1877,6 +1898,11 @@ def deploy_terraform(resource: AWSResource, request: Request):
                     for _d in _doms:
                         _dn = _d.get("DomainName","")
                         if _dn.endswith("." + domain) or _dn == domain:
+                            # Remove stale domain + mapping entries before re-injecting
+                            existing_state["resources"] = [
+                                r for r in existing_state.get("resources", [])
+                                if r.get("type") not in ("aws_apigatewayv2_domain_name","aws_apigatewayv2_api_mapping")
+                            ]
                             existing_state["resources"].append({
                                 "mode":"managed","type":"aws_apigatewayv2_domain_name","name":_apigw_tf_name,
                                 "provider":provider,
@@ -1887,6 +1913,25 @@ def deploy_terraform(resource: AWSResource, request: Request):
                                 }}]
                             })
                             yield f"data: ✓ API GW domain {_dn} written to state\n\n"
+                            # Also inject any existing API mappings for this domain
+                            try:
+                                _mappings = _apigw.get_api_mappings(DomainName=_dn).get("Items", [])
+                                _mapping_tf_name = _find_tf_resource_name(_main_tf_content, "aws_apigatewayv2_api_mapping")
+                                for _m in _mappings:
+                                    existing_state["resources"].append({
+                                        "mode":"managed","type":"aws_apigatewayv2_api_mapping",
+                                        "name":_mapping_tf_name,"provider":provider,
+                                        "instances":[{"schema_version":0,"sensitive_attributes":[],"attributes":{
+                                            "id":_m["ApiMappingId"],
+                                            "api_id":_m["ApiId"],
+                                            "api_mapping_key":_m.get("ApiMappingKey",""),
+                                            "domain_name":_dn,
+                                            "stage":_m.get("Stage","$default")
+                                        }}]
+                                    })
+                                    yield f"data: ✓ API GW mapping {_m['ApiMappingId']} written to state\n\n"
+                            except Exception as _me:
+                                yield f"data: ⚠ API GW mapping check: {_me}\n\n"
                 except Exception as _e:
                     yield f"data: ⚠ API GW domain check: {_e}\n\n"
 
