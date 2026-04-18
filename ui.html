@@ -3094,19 +3094,25 @@ function autoArrange(){
   var nids=Object.keys(nodes);
   if(!nids.length)return;
 
-  // Tier map: each group belongs to a horizontal row (tier)
-  // Tier 0 = top (entry), Tier 6 = bottom (support)
+  // Architecture tiers — top = user-facing, bottom = support
   var TIER={
-    network:0, proxy:0, api:1,
-    compute:2, serverless:2, container:2, k8s:2,
-    database:3, cache:3, storage:3,
-    messaging:4, streaming:4,
-    monitoring:5, security:5, auth:5,
-    cicd:6, gitops:6, iac:6, cfgmgmt:6, registry:6,
-    mesh:1, other:3
+    network:0, proxy:0,           // CDN, ALB, Route53, NAT, VPC
+    api:1,                         // API Gateway
+    compute:2, serverless:2,       // EC2, Lambda
+    container:2, k8s:2, mesh:2,   // ECS, EKS, Istio
+    database:3, cache:3,           // RDS, Redis, DynamoDB
+    storage:4,                     // S3, EFS
+    messaging:5, streaming:5,      // SQS, SNS, Kafka, Kinesis
+    security:6, auth:6,            // IAM, Secrets, WAF, KMS
+    monitoring:7,                  // CloudWatch, Prometheus, Grafana
+    cicd:8, gitops:8, iac:8,       // GHA, Jenkins, Terraform
+    cfgmgmt:8, registry:8,         // Ansible, ECR
+    other:3
   };
 
-  // Bucket each node into its tier
+  var NODE_W=190, NODE_H=75, H_GAP=50, V_GAP=90, MAX_PER_ROW=5;
+
+  // Bucket nodes into tiers
   var tiers={};
   nids.forEach(function(nid){
     var g=(nodes[nid].meta.group||nodes[nid].meta.grp||"other").toLowerCase();
@@ -3115,35 +3121,54 @@ function autoArrange(){
     tiers[t].push(nid);
   });
 
-  var NODE_W=180, NODE_H=80, H_GAP=40, V_GAP=60;
   var tierKeys=Object.keys(tiers).map(Number).sort(function(a,b){return a-b;});
 
-  // Find widest tier to center others
+  // Calculate max canvas width across all rows (respecting MAX_PER_ROW)
   var maxRowW=0;
   tierKeys.forEach(function(t){
-    var w=tiers[t].length*(NODE_W+H_GAP)-H_GAP;
+    var count=Math.min(tiers[t].length,MAX_PER_ROW);
+    var w=count*(NODE_W+H_GAP)-H_GAP;
     if(w>maxRowW)maxRowW=w;
   });
+  var canvasCenterX=maxRowW/2+80;
 
-  var curY=60;
+  var curY=70;
   tierKeys.forEach(function(t){
     var row=tiers[t];
-    var rowW=row.length*(NODE_W+H_GAP)-H_GAP;
-    var startX=Math.max(60,(maxRowW-rowW)/2+60);
-    row.forEach(function(nid,i){
-      var nx=startX+i*(NODE_W+H_GAP);
-      var ny=curY;
-      nodes[nid].x=nx; nodes[nid].y=ny;
-      var el=document.getElementById(nid);
-      if(el){el.style.left=nx+"px";el.style.top=ny+"px";}
-    });
-    curY+=NODE_H+V_GAP;
+    // Split into sub-rows of MAX_PER_ROW
+    for(var r=0;r<row.length;r+=MAX_PER_ROW){
+      var chunk=row.slice(r,r+MAX_PER_ROW);
+      var rowW=chunk.length*(NODE_W+H_GAP)-H_GAP;
+      var startX=canvasCenterX-rowW/2;
+      chunk.forEach(function(nid,i){
+        var nx=Math.round(startX+i*(NODE_W+H_GAP));
+        var ny=curY;
+        nodes[nid].x=nx; nodes[nid].y=ny;
+        var el=document.getElementById(nid);
+        if(el){el.style.left=nx+"px";el.style.top=ny+"px";}
+      });
+      curY+=NODE_H+V_GAP;
+    }
+    curY+=20; // extra gap between tiers
   });
 
   drawLines();updateReadiness();
-  // Fit view to content
-  zoom=1;panX=30;panY=30;applyTransform();
-  showNotif("ok","Arranged!","Nodes aligned in architecture tiers.","",2500);
+
+  // Auto-fit zoom so all nodes are visible
+  var allX=nids.map(function(n){return nodes[n].x;});
+  var allY=nids.map(function(n){return nodes[n].y;});
+  var minX=Math.min.apply(null,allX)-40;
+  var minY=Math.min.apply(null,allY)-40;
+  var maxX=Math.max.apply(null,allX)+NODE_W+40;
+  var maxY=Math.max.apply(null,allY)+NODE_H+40;
+  var cvRect=cvs.getBoundingClientRect();
+  var fitZoomX=(cvRect.width)/(maxX-minX);
+  var fitZoomY=(cvRect.height)/(maxY-minY);
+  zoom=Math.min(fitZoomX,fitZoomY,1);
+  panX=-minX*zoom+40;
+  panY=-minY*zoom+40;
+  applyTransform();
+  showNotif("ok","Arranged!","Nodes laid out in architecture tiers.","",2500);
 }
 cvs.addEventListener("wheel",function(e){
   var dp=document.getElementById("deploy-panel");var ap=document.getElementById("aws-scanner");
