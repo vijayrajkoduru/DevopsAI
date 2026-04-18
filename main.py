@@ -1570,57 +1570,82 @@ def deploy_terraform(resource: AWSResource, request: Request):
                 except Exception as _e:
                     yield f"data: ⚠ ACM check error: {_e}\n\n"
 
-            # ── Step 3: inject existing resources into tfstate directly ──
-            # (terraform import fails silently — writing state is more reliable)
-            if existing_zone_id or existing_cert_arn:
-                import uuid as _uuid
-                state_path = os.path.join(full_path, "terraform.tfstate")
-                # Load existing state or start fresh
-                existing_state = {"version":4,"terraform_version":"1.5.0","serial":1,
-                                  "lineage":str(_uuid.uuid4()),"outputs":{},"resources":[]}
-                if os.path.exists(state_path):
-                    try:
-                        with open(state_path) as _sf:
-                            existing_state = json.load(_sf)
-                    except Exception:
-                        pass
+            # ── Step 3: inject existing AWS resources into tfstate directly ──
+            import uuid as _uuid
+            state_path = os.path.join(full_path, "terraform.tfstate")
+            existing_state = {"version":4,"terraform_version":"1.5.0","serial":1,
+                              "lineage":str(_uuid.uuid4()),"outputs":{},"resources":[]}
+            if os.path.exists(state_path):
+                try:
+                    with open(state_path) as _sf:
+                        existing_state = json.load(_sf)
+                except Exception:
+                    pass
 
-                provider = 'provider["registry.terraform.io/hashicorp/aws"]'
-                # Remove any stale zone/cert resources from state
-                existing_state["resources"] = [
-                    r for r in existing_state.get("resources", [])
-                    if r.get("type") not in ("aws_route53_zone", "aws_acm_certificate")
-                ]
+            provider = 'provider["registry.terraform.io/hashicorp/aws"]'
 
-                if existing_zone_id:
-                    existing_state["resources"].append({
-                        "mode": "managed", "type": "aws_route53_zone", "name": "main",
-                        "provider": provider,
-                        "instances": [{"schema_version": 0, "sensitive_attributes": [], "attributes": {
-                            "id": existing_zone_id, "name": domain + ".",
-                            "comment": "Managed by Terraform", "force_destroy": False,
-                            "tags": {}, "tags_all": {}, "vpc": [], "zone_id": existing_zone_id,
-                            "primary_name_server": None, "name_servers": [], "arn": ""
-                        }}]
-                    })
-                    yield f"data: ✓ Zone {existing_zone_id} written to state\n\n"
+            # Read current main.tf to know which resource types are declared
+            _main_tf_content = ""
+            _main_tf_p = os.path.join(full_path, "main.tf")
+            if os.path.exists(_main_tf_p):
+                with open(_main_tf_p, encoding="utf-8") as _f:
+                    _main_tf_content = _f.read()
 
-                if existing_cert_arn:
-                    existing_state["resources"].append({
-                        "mode": "managed", "type": "aws_acm_certificate", "name": "main",
-                        "provider": provider,
-                        "instances": [{"schema_version": 0, "sensitive_attributes": [], "attributes": {
-                            "id": existing_cert_arn, "arn": existing_cert_arn,
-                            "domain_name": domain, "validation_method": "DNS",
-                            "subject_alternative_names": ["*." + domain, domain],
-                            "status": "ISSUED", "tags": {}, "tags_all": {},
-                            "domain_validation_options": [], "options": []
-                        }}]
-                    })
-                    yield f"data: ✓ ACM cert written to state\n\n"
+            # Remove stale shared resources from state so we can re-inject fresh
+            _stale_types = {"aws_route53_zone","aws_acm_certificate","aws_apigatewayv2_domain_name"}
+            existing_state["resources"] = [
+                r for r in existing_state.get("resources", [])
+                if r.get("type") not in _stale_types
+            ]
 
-                with open(state_path, "w") as _sf:
-                    json.dump(existing_state, _sf, indent=2)
+            if existing_zone_id:
+                existing_state["resources"].append({
+                    "mode":"managed","type":"aws_route53_zone","name":"main","provider":provider,
+                    "instances":[{"schema_version":0,"sensitive_attributes":[],"attributes":{
+                        "id":existing_zone_id,"name":domain+".","comment":"Managed by Terraform",
+                        "force_destroy":False,"tags":{},"tags_all":{},"vpc":[],"zone_id":existing_zone_id,
+                        "primary_name_server":None,"name_servers":[],"arn":""
+                    }}]
+                })
+                yield f"data: ✓ Zone {existing_zone_id} written to state\n\n"
+
+            if existing_cert_arn:
+                existing_state["resources"].append({
+                    "mode":"managed","type":"aws_acm_certificate","name":"main","provider":provider,
+                    "instances":[{"schema_version":0,"sensitive_attributes":[],"attributes":{
+                        "id":existing_cert_arn,"arn":existing_cert_arn,"domain_name":domain,
+                        "validation_method":"DNS","subject_alternative_names":["*."+domain,domain],
+                        "status":"ISSUED","tags":{},"tags_all":{},"domain_validation_options":[],"options":[]
+                    }}]
+                })
+                yield f"data: ✓ ACM cert written to state\n\n"
+
+            # Inject existing API Gateway custom domain names if declared in main.tf
+            if "aws_apigatewayv2_domain_name" in _main_tf_content and aws_creds and domain:
+                try:
+                    _apigw = _boto3.client("apigatewayv2",
+                        aws_access_key_id=aws_creds["access_key"],
+                        aws_secret_access_key=aws_creds["secret_key"],
+                        region_name=aws_creds["region"])
+                    _doms = _apigw.get_domain_names().get("Items", [])
+                    for _d in _doms:
+                        _dn = _d.get("DomainName","")
+                        if _dn.endswith("." + domain) or _dn == domain:
+                            existing_state["resources"].append({
+                                "mode":"managed","type":"aws_apigatewayv2_domain_name","name":"main",
+                                "provider":provider,
+                                "instances":[{"schema_version":0,"sensitive_attributes":[],"attributes":{
+                                    "id":_dn,"domain_name":_dn,"tags":{},"tags_all":{},
+                                    "api_mapping_selection_expression":"$request.basepath",
+                                    "arn":"","domain_name_configuration":[],"mutual_tls_authentication":[]
+                                }}]
+                            })
+                            yield f"data: ✓ API GW domain {_dn} written to state\n\n"
+                except Exception as _e:
+                    yield f"data: ⚠ API GW domain check: {_e}\n\n"
+
+            with open(state_path, "w") as _sf:
+                json.dump(existing_state, _sf, indent=2)
 
             # ── Step 4: terraform init ──
             for chunk in run_terraform_streaming(full_path, [
