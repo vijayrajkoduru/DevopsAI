@@ -6076,8 +6076,9 @@ document.addEventListener('DOMContentLoaded', function() {
   <div class="aap-foot" style="display:flex;flex-direction:column;gap:8px">
     <!-- Mode toggle -->
     <div style="display:flex;background:#13131f;border:1px solid #2a2a40;border-radius:8px;overflow:hidden">
-      <button id="aap-mode-canvas" onclick="setAapMode('canvas')" style="flex:1;padding:7px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;color:#fff;font-size:11px;font-weight:700;cursor:pointer">⚡ Canvas Analyze</button>
-      <button id="aap-mode-image" onclick="setAapMode('image')" style="flex:1;padding:7px;background:none;border:none;color:#555;font-size:11px;font-weight:700;cursor:pointer">🖼 Image Analyze</button>
+      <button id="aap-mode-canvas" onclick="setAapMode('canvas')" style="flex:1;padding:7px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;color:#fff;font-size:11px;font-weight:700;cursor:pointer">⚡ Analyze</button>
+      <button id="aap-mode-image" onclick="setAapMode('image')" style="flex:1;padding:7px;background:none;border:none;color:#555;font-size:11px;font-weight:700;cursor:pointer">🖼 Image</button>
+      <button id="aap-mode-chat" onclick="setAapMode('chat')" style="flex:1;padding:7px;background:none;border:none;color:#555;font-size:11px;font-weight:700;cursor:pointer">💬 Chat</button>
     </div>
     <!-- Canvas mode -->
     <div id="aap-canvas-mode">
@@ -6099,6 +6100,23 @@ document.addEventListener('DOMContentLoaded', function() {
         <span id="aap-img-btn-ico">🖼</span> <span id="aap-img-btn-lbl">Analyze Image & Build Canvas</span>
       </button>
     </div>
+    <!-- Chat mode -->
+    <div id="aap-chat-mode" style="display:none">
+      <div style="display:flex;gap:6px;align-items:flex-end">
+        <textarea id="aap-chat-input" placeholder="Ask anything about your architecture…" rows="2"
+          style="flex:1;background:#13131f;border:1px solid #2a2a40;border-radius:8px;color:#e2e8f0;font-size:12px;padding:8px 10px;resize:none;line-height:1.4;outline:none;transition:border-color 0.2s"
+          onfocus="this.style.borderColor='#6c47ff'" onblur="this.style.borderColor='#2a2a40'"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAapChat();}"></textarea>
+        <button onclick="sendAapChat()" id="aap-chat-send-btn"
+          style="padding:9px 14px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:8px;color:#fff;font-size:14px;cursor:pointer;flex-shrink:0;height:38px">
+          ➤
+        </button>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+        <span style="font-size:10px;color:#333">Shift+Enter for new line</span>
+        <button onclick="clearAapChat()" style="background:none;border:none;color:#333;font-size:10px;cursor:pointer;padding:0">Clear chat</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -6113,10 +6131,155 @@ function setAapMode(m){
   _aapMode=m;
   document.getElementById('aap-canvas-mode').style.display=m==='canvas'?'':'none';
   document.getElementById('aap-image-mode').style.display=m==='image'?'':'none';
+  document.getElementById('aap-chat-mode').style.display=m==='chat'?'':'none';
+  // canvas tab
   document.getElementById('aap-mode-canvas').style.background=m==='canvas'?'linear-gradient(135deg,#6c47ff,#8b5cf6)':'none';
   document.getElementById('aap-mode-canvas').style.color=m==='canvas'?'#fff':'#555';
+  // image tab
   document.getElementById('aap-mode-image').style.background=m==='image'?'linear-gradient(135deg,#0e7490,#0891b2)':'none';
   document.getElementById('aap-mode-image').style.color=m==='image'?'#fff':'#555';
+  // chat tab
+  document.getElementById('aap-mode-chat').style.background=m==='chat'?'linear-gradient(135deg,#059669,#10b981)':'none';
+  document.getElementById('aap-mode-chat').style.color=m==='chat'?'#fff':'#555';
+  // When entering chat mode, show the chat thread in body
+  if(m==='chat') _aapShowChatBody();
+}
+
+// ── ARCH AGENT CHAT ───────────────────────────────────────────────────────────
+var _aapChatHistory=[];
+
+function _aapShowChatBody(){
+  var body=document.getElementById('aap-body');
+  var thread=document.getElementById('aap-chat-thread');
+  if(!thread){
+    body.innerHTML='<div id="aap-chat-thread" style="display:flex;flex-direction:column;gap:10px;padding:4px 0"></div>';
+    thread=document.getElementById('aap-chat-thread');
+    if(!_aapChatHistory.length){
+      thread.innerHTML='<div style="text-align:center;padding:24px 12px;color:#444"><div style="font-size:26px;margin-bottom:8px">💬</div><div style="font-size:11px;line-height:1.6;color:#555">Ask me anything about your architecture.<br>Describe what you need and I\'ll help design it.</div></div>';
+    } else {
+      // Re-render existing history
+      _aapChatHistory.forEach(function(msg){_appendChatBubble(msg.role,msg.content,false);});
+    }
+  }
+}
+
+function _appendChatBubble(role, text, scroll){
+  var thread=document.getElementById('aap-chat-thread');
+  if(!thread){_aapShowChatBody();thread=document.getElementById('aap-chat-thread');}
+  // Remove empty state placeholder
+  var placeholder=thread.querySelector('div[style*="text-align:center"]');
+  if(placeholder&&!_aapChatHistory.length)placeholder.remove();
+
+  var isUser=role==='user';
+  var bubble=document.createElement('div');
+  bubble.style.cssText='display:flex;flex-direction:column;align-items:'+(isUser?'flex-end':'flex-start');
+  var inner=document.createElement('div');
+  inner.style.cssText='max-width:88%;padding:9px 12px;border-radius:'+(isUser?'12px 12px 4px 12px':'12px 12px 12px 4px')+';background:'+(isUser?'linear-gradient(135deg,#6c47ff,#8b5cf6)':'#13131f')+';color:'+(isUser?'#fff':'#d1d5db')+';font-size:12px;line-height:1.55;border:1px solid '+(isUser?'transparent':'#1e1e30')+';white-space:pre-wrap;word-break:break-word';
+  inner.textContent=text;
+  bubble.appendChild(inner);
+  thread.appendChild(bubble);
+  if(scroll!==false){thread.parentElement.scrollTop=thread.parentElement.scrollHeight;}
+  return inner;
+}
+
+async function sendAapChat(){
+  var input=document.getElementById('aap-chat-input');
+  var msg=input.value.trim();
+  if(!msg)return;
+  var btn=document.getElementById('aap-chat-send-btn');
+  input.value='';
+  btn.disabled=true;btn.textContent='…';
+
+  // Ensure chat body is visible
+  if(_aapMode!=='chat')setAapMode('chat');
+  _appendChatBubble('user',msg,true);
+  _aapChatHistory.push({role:'user',content:msg});
+
+  // Typing indicator
+  var thread=document.getElementById('aap-chat-thread');
+  var typingDiv=document.createElement('div');
+  typingDiv.style.cssText='display:flex;align-items:flex-start';
+  typingDiv.innerHTML='<div style="padding:9px 12px;border-radius:12px 12px 12px 4px;background:#13131f;border:1px solid #1e1e30;color:#555;font-size:12px">●●●</div>';
+  thread.appendChild(typingDiv);
+  thread.parentElement.scrollTop=thread.parentElement.scrollHeight;
+
+  // Collect canvas services
+  var canvasSvcs=Object.values(nodes).map(function(n){return{id:n.meta.id||n.id,label:n.meta.label||n.id,group:n.meta.group||''};});
+
+  try{
+    var res=await fetch('/arch-agent/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'include',
+      body:JSON.stringify({message:msg,canvas_services:canvasSvcs,chat_history:_aapChatHistory.slice(0,-1)})
+    });
+    if(!res.ok){var err=await res.json();throw new Error(err.detail||'Failed');}
+    var reader=res.body.getReader();
+    var decoder=new TextDecoder();
+    var fullText='';
+    typingDiv.remove();
+    var aiBubble=_appendChatBubble('assistant','',true);
+    while(true){
+      var chunk=await reader.read();
+      if(chunk.done)break;
+      fullText+=decoder.decode(chunk.value,{stream:true});
+      // Strip <add_services> tag for display
+      aiBubble.textContent=fullText.replace(/<add_services>[\s\S]*?<\/add_services>/g,'').trim();
+      thread.parentElement.scrollTop=thread.parentElement.scrollHeight;
+    }
+    // Parse add_services
+    var match=fullText.match(/<add_services>([\s\S]*?)<\/add_services>/);
+    var displayText=fullText.replace(/<add_services>[\s\S]*?<\/add_services>/g,'').trim();
+    aiBubble.textContent=displayText;
+    _aapChatHistory.push({role:'assistant',content:displayText});
+
+    if(match){
+      try{
+        var svcs=JSON.parse(match[1]);
+        if(svcs&&svcs.length){
+          // Show add-to-canvas prompt
+          var addDiv=document.createElement('div');
+          addDiv.style.cssText='display:flex;flex-direction:column;align-items:flex-start;gap:4px';
+          var addLabel=document.createElement('div');
+          addLabel.style.cssText='font-size:10px;color:#6c47ff;padding-left:4px';
+          addLabel.textContent='AI suggests adding '+svcs.length+' service(s):';
+          var addBtn=document.createElement('button');
+          addBtn.style.cssText='padding:6px 12px;background:linear-gradient(135deg,#059669,#10b981);border:none;border-radius:7px;color:#fff;font-size:11px;font-weight:700;cursor:pointer';
+          addBtn.textContent='+ Add to Canvas';
+          addBtn.onclick=function(){
+            var cols=Math.ceil(Math.sqrt(svcs.length));
+            svcs.forEach(function(svc,i){
+              var existingIds=Object.values(nodes).map(function(n){return n.meta.id;});
+              if(existingIds.indexOf(svc.id)!==-1) return;
+              var col=i%cols,row=Math.floor(i/cols);
+              var cx=200+col*210,cy=200+row*150;
+              createNode({id:svc.id,label:svc.label,catName:svc.group||'compute',subName:'',group:svc.group||'compute',catType:'aws'},cx,cy);
+            });
+            updateReadiness();
+            showNotif('ok','Added!',svcs.length+' service(s) added to canvas','',2500);
+            addBtn.remove();addLabel.remove();
+          };
+          addDiv.appendChild(addLabel);
+          addDiv.appendChild(addBtn);
+          thread.appendChild(addDiv);
+          thread.parentElement.scrollTop=thread.parentElement.scrollHeight;
+        }
+      }catch(e){}
+    }
+  }catch(err){
+    typingDiv.remove();
+    _appendChatBubble('assistant','Error: '+err.message,true);
+  }finally{
+    btn.disabled=false;btn.textContent='➤';
+    input.focus();
+  }
+}
+
+function clearAapChat(){
+  _aapChatHistory=[];
+  var thread=document.getElementById('aap-chat-thread');
+  if(thread)thread.remove();
+  _aapShowChatBody();
 }
 function aapImageSelect(input){
   var f=input.files[0]; if(!f) return;

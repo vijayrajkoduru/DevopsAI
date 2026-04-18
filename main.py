@@ -2609,6 +2609,65 @@ def architect_analyze_image(req: ArchImageRequest, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── ARCH AGENT CHAT ───────────────────────────────────────────────────────────
+
+class ArchChatRequest(BaseModel):
+    message: str
+    canvas_services: list = []
+    chat_history: list = []
+
+@app.post("/arch-agent/chat")
+@limiter.limit("30/minute")
+def arch_agent_chat(req: ArchChatRequest, request: Request):
+    require_auth(request)
+
+    canvas_ctx = ""
+    if req.canvas_services:
+        labels = [s.get("label", s.get("id", "")) for s in req.canvas_services]
+        canvas_ctx = f"\n\nCurrent canvas ({len(req.canvas_services)} services): {', '.join(labels)}."
+
+    system = (
+        "You are an expert DevOps/Cloud architect assistant helping a user design infrastructure on a canvas tool.\n"
+        "Answer questions, suggest improvements, explain trade-offs, and help design architectures.\n"
+        "Be concise and practical. Use bullet points where helpful.\n"
+        "If you suggest adding specific services to the canvas, include them at the END of your response in this exact format "
+        "(do NOT include it if you have nothing to add):\n"
+        "<add_services>[{\"id\":\"<service_id>\",\"label\":\"<Name>\",\"group\":\"<group>\"}]</add_services>\n\n"
+        "Valid service IDs: ec2_instance, ec2_asg, alb, nlb, vpc_main, vpc_igw, vpc_nat, vpc_sg, cf_dist, "
+        "r53_zone, acm_cert, waf_webacl, s3_bucket, rds_instance, rds_aurora, dynamodb_table, elasticache_redis, "
+        "lambda_fn, ecs_cluster, ecs_fargate, eks_cluster, sqs_std, sns_topic, kinesis_stream, cloudwatch, "
+        "cw_alarm, iam_role, secrets_mgr, kms_key, ecr_repo, apigw_rest, apigw_http, "
+        "codepipeline, gha_ci, gha_cd, prom_cfg, grafana_ds, loki_cfg, tf_main, ansible_site, "
+        "jenkins_decl, argocd_app, docker_file, k8s_deploy, k8s_ingress, helm_chart, "
+        "kafka_cluster, nginx_proxy, vault_cfg.\n"
+        "Valid groups: compute, serverless, container, k8s, database, cache, storage, network, api, "
+        "security, monitoring, messaging, streaming, cicd, gitops, iac, registry, proxy."
+        + canvas_ctx
+    )
+
+    messages = []
+    for h in req.chat_history:
+        role = h.get("role", "user")
+        if role in ("user", "assistant"):
+            messages.append({"role": role, "content": h.get("content", "")})
+    messages.append({"role": "user", "content": req.message})
+
+    def stream():
+        try:
+            with client.messages.stream(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                system=system,
+                messages=messages
+            ) as s:
+                for text in s.text_stream:
+                    yield text
+        except Exception as e:
+            yield f"\n[Error: {str(e)}]"
+
+    return StreamingResponse(stream(), media_type="text/plain")
+
+
 # ── GITHUB IMPORT → CANVAS ────────────────────────────────────────────────────
 
 class GitHubImportRequest(BaseModel):
