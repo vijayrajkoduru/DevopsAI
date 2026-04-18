@@ -1447,6 +1447,26 @@ def deploy_terraform(resource: AWSResource, request: Request):
     logger.info(f"Deploy started by {user['email']} for folder: {folder}")
 
     def run():
+        # ── Pre-deploy: fix duplicate required_providers across main.tf + providers.tf ──
+        _main_tf   = os.path.join(full_path, "main.tf")
+        _prov_tf   = os.path.join(full_path, "providers.tf")
+        if os.path.exists(_main_tf) and os.path.exists(_prov_tf):
+            try:
+                with open(_main_tf, encoding="utf-8") as _f:
+                    _main_content = _f.read()
+                with open(_prov_tf, encoding="utf-8") as _f:
+                    _prov_content = _f.read()
+                # If both files declare required_providers, remove it from providers.tf
+                if "required_providers" in _main_content and "required_providers" in _prov_content:
+                    import re as _re
+                    _cleaned = _re.sub(
+                        r'terraform\s*\{[^}]*required_providers[^}]*\{[^}]*\}[^}]*\}',
+                        '', _prov_content, flags=_re.DOTALL).strip()
+                    with open(_prov_tf, "w", encoding="utf-8") as _f:
+                        _f.write(_cleaned)
+            except Exception:
+                pass
+
         yield "data: === Starting Terraform Deploy ===\n\n"
         yield f"data: Environment: {environment} | Region: {region}\n\n"
         if domain:
@@ -1550,20 +1570,63 @@ def deploy_terraform(resource: AWSResource, request: Request):
                 except Exception as _e:
                     yield f"data: ⚠ ACM check error: {_e}\n\n"
 
-            # ── Step 3: terraform init then import existing resources ──
+            # ── Step 3: inject existing resources into tfstate directly ──
+            # (terraform import fails silently — writing state is more reliable)
+            if existing_zone_id or existing_cert_arn:
+                import uuid as _uuid
+                state_path = os.path.join(full_path, "terraform.tfstate")
+                # Load existing state or start fresh
+                existing_state = {"version":4,"terraform_version":"1.5.0","serial":1,
+                                  "lineage":str(_uuid.uuid4()),"outputs":{},"resources":[]}
+                if os.path.exists(state_path):
+                    try:
+                        with open(state_path) as _sf:
+                            existing_state = json.load(_sf)
+                    except Exception:
+                        pass
+
+                provider = 'provider["registry.terraform.io/hashicorp/aws"]'
+                # Remove any stale zone/cert resources from state
+                existing_state["resources"] = [
+                    r for r in existing_state.get("resources", [])
+                    if r.get("type") not in ("aws_route53_zone", "aws_acm_certificate")
+                ]
+
+                if existing_zone_id:
+                    existing_state["resources"].append({
+                        "mode": "managed", "type": "aws_route53_zone", "name": "main",
+                        "provider": provider,
+                        "instances": [{"schema_version": 0, "sensitive_attributes": [], "attributes": {
+                            "id": existing_zone_id, "name": domain + ".",
+                            "comment": "Managed by Terraform", "force_destroy": False,
+                            "tags": {}, "tags_all": {}, "vpc": [], "zone_id": existing_zone_id,
+                            "primary_name_server": None, "name_servers": [], "arn": ""
+                        }}]
+                    })
+                    yield f"data: ✓ Zone {existing_zone_id} written to state\n\n"
+
+                if existing_cert_arn:
+                    existing_state["resources"].append({
+                        "mode": "managed", "type": "aws_acm_certificate", "name": "main",
+                        "provider": provider,
+                        "instances": [{"schema_version": 0, "sensitive_attributes": [], "attributes": {
+                            "id": existing_cert_arn, "arn": existing_cert_arn,
+                            "domain_name": domain, "validation_method": "DNS",
+                            "subject_alternative_names": ["*." + domain, domain],
+                            "status": "ISSUED", "tags": {}, "tags_all": {},
+                            "domain_validation_options": [], "options": []
+                        }}]
+                    })
+                    yield f"data: ✓ ACM cert written to state\n\n"
+
+                with open(state_path, "w") as _sf:
+                    json.dump(existing_state, _sf, indent=2)
+
+            # ── Step 4: terraform init ──
             for chunk in run_terraform_streaming(full_path, [
                 ["terraform", "init", "-no-color"]
             ], aws_creds=aws_creds):
                 yield chunk
-
-            if existing_zone_id:
-                subprocess.run(
-                    ["terraform", "import", "-no-color"] + tf_vars + ["aws_route53_zone.main", existing_zone_id],
-                    cwd=full_path, env=tf_env, capture_output=True, text=True)
-            if existing_cert_arn:
-                subprocess.run(
-                    ["terraform", "import", "-no-color"] + tf_vars + ["aws_acm_certificate.main", existing_cert_arn],
-                    cwd=full_path, env=tf_env, capture_output=True, text=True)
 
             phase1_failed = False
             for chunk in run_terraform_streaming(full_path, [
