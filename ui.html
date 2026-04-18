@@ -1473,22 +1473,98 @@ function dropAndAutoConnect(droppedMeta,cx,cy){
     var newId="n"+nc;
     if(!nodes[newId])return;
     var targets=getCompatGroups(droppedMeta);
-    var connected=[];
+    var candidates=[];
     Object.keys(nodes).forEach(function(oid){
       if(oid===newId)return;
       var og=(nodes[oid].meta.group||nodes[oid].meta.grp||"").toLowerCase();
       if(targets.indexOf(og)<0)return;
-      var compat=getCompat(droppedMeta.group||droppedMeta.grp||"",nodes[oid].meta.group||nodes[oid].meta.grp||"");
+      var compat=getCompat(droppedMeta.group||droppedMeta.grp||"",og);
       if(!compat.ok)return;
       var already=conns.some(function(c){return (c.f===newId&&c.t===oid)||(c.t===newId&&c.f===oid);});
       if(already)return;
-      conns.push({f:newId,t:oid});
-      connected.push(nodes[oid].meta.label);
+      candidates.push(oid);
     });
-    if(connected.length){drawLines();updateReadiness();
-      showNotif("ok","Auto-connected!",droppedMeta.label+" → "+connected.join(", "),"",3000);}
+    if(candidates.length) showConnSuggest(newId, candidates);
   },80);
 }
+
+// Show floating connection suggestion panel next to a node
+var _connSuggestTimer=null;
+function showConnSuggest(srcId, candidateIds){
+  var old=document.getElementById("conn-suggest-panel");if(old)old.remove();
+  if(!candidateIds.length)return;
+  var sn=nodes[srcId];if(!sn)return;
+
+  var panel=document.createElement("div");
+  panel.id="conn-suggest-panel";
+  panel.style.cssText="position:absolute;z-index:8000;background:#0d0d1e;border:1px solid #2a2a40;border-radius:10px;padding:10px 12px;min-width:190px;max-width:240px;box-shadow:0 8px 32px rgba(0,0,0,0.6)";
+  panel.style.left=(sn.x+200)+"px";
+  panel.style.top=sn.y+"px";
+
+  var title=document.createElement("div");
+  title.style.cssText="font-size:10px;color:#6c47ff;font-weight:700;letter-spacing:.5px;margin-bottom:7px";
+  title.textContent="⚡ CONNECT "+sn.meta.label.toUpperCase()+" TO";
+  panel.appendChild(title);
+
+  candidateIds.forEach(function(oid){
+    var tgt=nodes[oid];if(!tgt)return;
+    var row=document.createElement("div");
+    row.style.cssText="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;gap:8px";
+    var lbl=document.createElement("span");
+    lbl.style.cssText="font-size:11px;color:#ccc;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+    lbl.textContent=tgt.meta.label;
+    var btn=document.createElement("button");
+    btn.style.cssText="padding:3px 9px;background:#1a1a3a;border:1px solid #6c47ff;border-radius:5px;color:#a78bfa;font-size:10px;font-weight:700;cursor:pointer;flex-shrink:0";
+    btn.textContent="↔";
+    btn.title="Connect "+sn.meta.label+" ↔ "+tgt.meta.label;
+    (function(from,to,b,r){
+      b.onclick=function(){
+        var alr=conns.some(function(c){return (c.f===from&&c.t===to)||(c.f===to&&c.t===from);});
+        if(!alr){conns.push({f:from,t:to});drawLines();updateReadiness();}
+        b.textContent="✓";b.style.background="#0d2a0d";b.style.color="#4ade80";b.style.borderColor="#16a34a";b.disabled=true;
+        r.style.opacity="0.5";
+      };
+    })(srcId,oid,btn,row);
+    row.appendChild(lbl);
+    row.appendChild(btn);
+    panel.appendChild(row);
+  });
+
+  // Connect All + Close row
+  var foot=document.createElement("div");
+  foot.style.cssText="display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #1e1e30";
+  var allBtn=document.createElement("button");
+  allBtn.style.cssText="flex:1;padding:5px;background:linear-gradient(135deg,#6c47ff,#8b5cf6);border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:700;cursor:pointer";
+  allBtn.textContent="Connect All";
+  allBtn.onclick=function(){
+    candidateIds.forEach(function(oid){
+      var alr=conns.some(function(c){return (c.f===srcId&&c.t===oid)||(c.f===oid&&c.t===srcId);});
+      if(!alr)conns.push({f:srcId,t:oid});
+    });
+    drawLines();updateReadiness();
+    panel.remove();
+    showNotif("ok","Connected!",sn.meta.label+" linked to "+candidateIds.length+" service(s)","",2500);
+  };
+  var closeBtn=document.createElement("button");
+  closeBtn.style.cssText="padding:5px 9px;background:none;border:1px solid #2a2a40;border-radius:6px;color:#555;font-size:10px;cursor:pointer";
+  closeBtn.textContent="Skip";
+  closeBtn.onclick=function(){panel.remove();};
+  foot.appendChild(allBtn);
+  foot.appendChild(closeBtn);
+  panel.appendChild(foot);
+
+  document.getElementById("cnodes").appendChild(panel);
+
+  // Auto-dismiss after 12s
+  if(_connSuggestTimer)clearTimeout(_connSuggestTimer);
+  _connSuggestTimer=setTimeout(function(){var p=document.getElementById("conn-suggest-panel");if(p)p.remove();},12000);
+}
+
+// Close suggestion panel when clicking elsewhere on canvas
+document.getElementById("cvs").addEventListener("mousedown",function(e){
+  var p=document.getElementById("conn-suggest-panel");
+  if(p&&!p.contains(e.target))p.remove();
+});
 var _pendingDupeMeta=null,_pendingDupeX=0,_pendingDupeY=0;
 function showDupeConfirm(meta,cx,cy,existingNames){
   _pendingDupeMeta=meta;_pendingDupeX=cx;_pendingDupeY=cy;
@@ -6248,16 +6324,38 @@ async function sendAapChat(){
           addBtn.textContent='+ Add to Canvas';
           addBtn.onclick=function(){
             var cols=Math.ceil(Math.sqrt(svcs.length));
+            var addedIds=[];
             svcs.forEach(function(svc,i){
               var existingIds=Object.values(nodes).map(function(n){return n.meta.id;});
               if(existingIds.indexOf(svc.id)!==-1) return;
               var col=i%cols,row=Math.floor(i/cols);
               var cx=200+col*210,cy=200+row*150;
               createNode({id:svc.id,label:svc.label,catName:svc.group||'compute',subName:'',group:svc.group||'compute',catType:'aws'},cx,cy);
+              addedIds.push('n'+nc);
             });
             updateReadiness();
             showNotif('ok','Added!',svcs.length+' service(s) added to canvas','',2500);
-            addBtn.remove();addLabel.remove();
+            addBtn.disabled=true;addBtn.textContent='✓ Added';
+            // Show connection suggestions between newly added services and existing ones
+            setTimeout(function(){
+              addedIds.forEach(function(nid){
+                if(!nodes[nid])return;
+                var grp=(nodes[nid].meta.group||'compute').toLowerCase();
+                var targets=getCompatGroups(nodes[nid].meta);
+                var candidates=[];
+                Object.keys(nodes).forEach(function(oid){
+                  if(oid===nid)return;
+                  var og=(nodes[oid].meta.group||'').toLowerCase();
+                  if(targets.indexOf(og)<0)return;
+                  var compat=getCompat(grp,og);
+                  if(!compat.ok)return;
+                  var already=conns.some(function(c){return (c.f===nid&&c.t===oid)||(c.f===oid&&c.t===nid);});
+                  if(already)return;
+                  candidates.push(oid);
+                });
+                if(candidates.length) showConnSuggest(nid,candidates);
+              });
+            },120);
           };
           addDiv.appendChild(addLabel);
           addDiv.appendChild(addBtn);
