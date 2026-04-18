@@ -456,7 +456,10 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
           </div>
         </div>
         <div class="dp-btns">
-          <button class="dp-btn dp-deploy" id="deploy-all-btn" onclick="deployAll()">🚀 Deploy ALL Services</button>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <button class="dp-btn dp-deploy" id="deploy-all-btn" onclick="deployAll()">🚀 Deploy ALL Services</button>
+            <span id="deploy-eta" style="display:none;background:#1a1a2e;border:1px solid #fbbf24;border-radius:8px;padding:4px 12px;font-size:11px;color:#fbbf24;font-weight:600;white-space:nowrap"></span>
+          </div>
           <button class="dp-btn dp-destroy" id="destroy-all-btn" onclick="destroyAll()">🗑 DESTROY ALL in AWS</button>
           <button class="dp-btn dp-selected" id="deploy-btn" onclick="startDeploy()">⚡ Deploy Selected</button>
           <button class="dp-btn dp-stop" id="stop-deploy-btn" onclick="stopDeploy()">⏹ Stop Deploy</button>
@@ -3599,6 +3602,41 @@ function copyDeployLog(){
   });
 }
 var deployStop=false;
+var _deployStartTime=0;
+var _deployTimes=[];  // track actual time per service for better estimates
+
+function _fmtTime(ms){
+  var m=Math.floor(ms/60000),s=Math.floor((ms%60000)/1000);
+  return m>0?m+"m "+s+"s":s+"s";
+}
+function _finishTime(remainingMs){
+  var d=new Date(Date.now()+remainingMs);
+  return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+}
+function _avgServiceTime(){ return _deployTimes.length?(_deployTimes.reduce((a,b)=>a+b,0)/_deployTimes.length):180000; }
+
+function _updateEta(done,total,etaEl){
+  if(!etaEl||done>=total){return;}
+  var avg=_avgServiceTime();
+  var remMs=avg*(total-done);
+  etaEl.textContent="⏱ ~"+_fmtTime(remMs)+" left · finish ~"+_finishTime(remMs);
+}
+
+async function _aiFixAndRetry(folder,errorText,env,region,domain){
+  // Ask Claude to fix the broken tf files, returns true if fix applied
+  try{
+    var r=await fetch("/deploy/ai-fix",{
+      method:"POST",credentials:"include",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({folder:folder,error:errorText,env:env,region:region,domain:domain})
+    });
+    if(!r.ok)return false;
+    var data=await r.json();
+    return data.fixed||false;
+  }catch(e){return false;}
+}
+
+var deployStop=false;
 async function deployAll(){
   var sel=document.getElementById("deploy-folder");if(!sel)return;
   var env=(document.getElementById("deploy-env")||{}).value||"dev";
@@ -3612,27 +3650,85 @@ async function deployAll(){
   if(domain)confirmMsg+="\nDomain: "+domain;
   confirmMsg+="\n\nReal AWS resources will be created and may incur costs.";
   if(!confirm(confirmMsg))return;
+
   var log=document.getElementById("deploy-log");
   var status=document.getElementById("deploy-status");
   var btn=document.getElementById("deploy-all-btn");
+  var etaEl=document.getElementById("deploy-eta");
+
+  // Estimate based on folder count (avg 3 min each)
+  var estMs=folders.length*180000;
+  _deployStartTime=Date.now();
+  _deployTimes=[];
+
   log.innerHTML='<div style="color:#555;font-size:10px;margin-bottom:8px">Environment: <b style="color:#a78bfa">'+env+'</b> &nbsp;|&nbsp; Region: <b style="color:#60a5fa">'+region+'</b>'+(domain?' &nbsp;|&nbsp; Domain: <b style="color:#fbbf24">'+domain+'</b>':'')+'</div>';
   deployStop=false;
   btn.disabled=true;btn.textContent="⚡ Deploying...";btn.style.animation="breathe-y 1.5s ease-in-out infinite";
   document.getElementById("stop-deploy-btn").style.display="block";
   status.style.display="block";status.style.color="#fbbf24";
-  var success=0,failed=0;
+
+  // Show initial ETA
+  etaEl.style.display="inline-block";
+  etaEl.textContent="⏱ ~"+_fmtTime(estMs)+" left · finish ~"+_finishTime(estMs);
+
+  var success=0,failed=0,autoFixed=0;
   for(var i=0;i<folders.length;i++){
     if(deployStop)break;
+    var svcStart=Date.now();
     status.textContent="Deploying "+(i+1)+" of "+folders.length+": "+folders[i]+"...";
     log.innerHTML+='<div style="color:#a78bfa;font-weight:700;margin:5px 0">== ['+(i+1)+'/'+folders.length+'] Deploying: '+folders[i]+' ==</div>';
     log.scrollTop=log.scrollHeight;
+
     var result=await runDeploy(folders[i],env,region,domain);
-    if(result)success++;else failed++;
+
+    if(!result){
+      // ── Auto-fix: collect last error lines from log, ask Claude to fix ──
+      var logDiv=document.getElementById("deploy-log");
+      var allLines=logDiv.innerText.split("\n");
+      var lastLines=allLines.slice(-80).join("\n"); // last 80 lines = the error context
+      log.innerHTML+='<div style="color:#f59e0b;font-size:11px;margin:4px 0">🔧 Auto-fixing '+folders[i]+' — asking Claude...</div>';
+      log.scrollTop=log.scrollHeight;
+
+      var fixed=await _aiFixAndRetry(folders[i],lastLines,env,region,domain);
+      if(fixed){
+        autoFixed++;
+        log.innerHTML+='<div style="color:#4ade80;font-size:11px;margin:4px 0">✓ Claude fixed the issue — retrying deploy...</div>';
+        log.scrollTop=log.scrollHeight;
+        result=await runDeploy(folders[i],env,region,domain);
+      }
+      if(!result){
+        failed++;
+        log.innerHTML+='<div style="color:#f87171;font-size:11px;margin:4px 0">✗ '+folders[i]+' failed'+(fixed?" even after auto-fix":"")+' — skipping</div>';
+      } else {
+        success++;
+        log.innerHTML+='<div style="color:#4ade80;font-size:11px;margin:4px 0">✓ '+folders[i]+' deployed after auto-fix!</div>';
+      }
+    } else {
+      success++;
+    }
+
+    // Track actual time and update ETA
+    _deployTimes.push(Date.now()-svcStart);
+    _updateEta(i+1,folders.length,etaEl);
   }
-  deployStop=false;btn.disabled=false;btn.textContent="🚀 Deploy ALL Services";btn.style.animation="";btn.style.boxShadow="";
+
+  // Done
+  deployStop=false;
+  btn.disabled=false;btn.textContent="🚀 Deploy ALL Services";btn.style.animation="";btn.style.boxShadow="";
   document.getElementById("stop-deploy-btn").style.display="none";
-  if(failed===0){status.style.color="#4ade80";status.textContent="All "+success+" services deployed!";showNotif("ok","All Deployed!",success+" services created in AWS!","",6000);}
-  else{status.style.color="#fbbf24";status.textContent=success+" deployed, "+failed+" failed.";showNotif("warn","Partial Deploy",success+" succeeded, "+failed+" failed.","",6000);}
+  var totalTime=_fmtTime(Date.now()-_deployStartTime);
+  etaEl.textContent="✓ Done in "+totalTime;
+  etaEl.style.borderColor="#4ade80";etaEl.style.color="#4ade80";
+
+  if(failed===0){
+    status.style.color="#4ade80";
+    status.textContent="All "+success+" services deployed!"+(autoFixed?" ("+autoFixed+" auto-fixed by Claude)":"");
+    showNotif("ok","All Deployed!",success+" services created in AWS!"+(autoFixed?" "+autoFixed+" auto-fixed.":""),"",6000);
+  }else{
+    status.style.color="#fbbf24";
+    status.textContent=success+" deployed, "+failed+" failed."+(autoFixed?" "+autoFixed+" auto-fixed.":"");
+    showNotif("warn","Partial Deploy",success+" succeeded, "+failed+" failed.","",6000);
+  }
 }
 async function destroyAll(){
   var dbtn=document.getElementById("destroy-all-btn");

@@ -2962,6 +2962,106 @@ def get_deploy_folders(request: Request):
     scan_dir(user_dir)
     return {"folders": folders}
 
+# ── AI FIX ENDPOINT ────────────────────────────────────────────────────────────
+
+class AiFixRequest(BaseModel):
+    folder: str
+    error: str
+    env: str = "dev"
+    region: str = "us-east-1"
+    domain: str = ""
+
+@app.post("/deploy/ai-fix")
+def deploy_ai_fix(req: AiFixRequest, request: Request):
+    require_auth(request)
+    user_dir = get_user_output_dir(request)
+    full_path = safe_path(user_dir, req.folder)
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="Folder not found")
+
+    # Read all .tf files
+    tf_files = {}
+    for fname in os.listdir(full_path):
+        if fname.endswith(".tf"):
+            fpath = os.path.join(full_path, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    tf_files[fname] = f.read()
+            except Exception:
+                pass
+
+    if not tf_files:
+        return {"fixed": False, "reason": "No .tf files found"}
+
+    # Build prompt for Claude
+    files_block = "\n\n".join(
+        f"<<FILE:{name}>>\n{content}\n<<END_FILE>>"
+        for name, content in tf_files.items()
+    )
+    prompt = f"""You are a Terraform expert. A deployment failed with the following error:
+
+<error>
+{req.error}
+</error>
+
+Here are ALL the Terraform files in the failing service folder:
+
+{files_block}
+
+Context: env={req.env}, region={req.region}, domain={req.domain or 'none'}
+
+Your task:
+1. Identify ALL issues (syntax errors, duplicate blocks, orphaned braces, duplicate required_providers, missing resources, wrong resource types, etc.)
+2. Fix every issue you find
+3. Return ONLY the corrected files using this EXACT format for each file you changed:
+
+<<FILE:filename.tf>>
+<full corrected file content here>
+<<END_FILE>>
+
+IMPORTANT:
+- Only output files that actually need changes
+- Do NOT add explanations outside the file blocks
+- Do NOT truncate any file content
+- Fix ALL issues, not just the one in the error message
+"""
+
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=8192,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        response_text = message.content[0].text
+    except Exception as e:
+        return {"fixed": False, "reason": str(e)}
+
+    # Parse <<FILE:name>> blocks and write fixed files
+    pattern = r'<<FILE:([^>]+)>>\s*([\s\S]*?)<<END_FILE>>'
+    matches = re.findall(pattern, response_text)
+    if not matches:
+        return {"fixed": False, "reason": "Claude returned no file fixes"}
+
+    files_changed = []
+    for fname, content in matches:
+        fname = fname.strip()
+        # Security: only allow .tf files within the folder
+        if not re.match(r'^[\w\-\.]+\.tf$', fname):
+            continue
+        dest = os.path.join(full_path, fname)
+        try:
+            with open(dest, "w", encoding="utf-8") as f:
+                f.write(content.strip() + "\n")
+            files_changed.append(fname)
+            logger.info("ai-fix wrote %s in %s", fname, req.folder)
+        except Exception as e:
+            logger.warning("ai-fix failed to write %s: %s", fname, e)
+
+    if not files_changed:
+        return {"fixed": False, "reason": "No valid .tf files in Claude response"}
+
+    return {"fixed": True, "files_changed": files_changed}
+
 # ── OPEN IN VS CODE ────────────────────────────────────────────────────────────
 
 class VSCodeRequest(BaseModel):
