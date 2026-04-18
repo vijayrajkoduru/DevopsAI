@@ -945,7 +945,9 @@ def generate_terraform(resource: AWSResource, request: Request):
         + "\n\nRULES:\n"
         + "1. All variables MUST have default values\n"
         + "2. For EC2 Ubuntu 22.04 us-east-1 use AMI: ami-0c7217cdde317cfec\n"
-        + "3. Use default VPC and subnets if none specified. For subnets data source ALWAYS add a filter to exclude us-east-1e: filter { name = \"availability-zone\" values = [\"us-east-1a\", \"us-east-1b\", \"us-east-1c\", \"us-east-1d\", \"us-east-1f\"] }\n"
+        + "3. Use default VPC and subnets if none specified. For the subnets data source ALWAYS add BOTH of these filters to exclude local/wavelength zones that don't support all instance types:\n"
+        + "   data \"aws_availability_zones\" \"available\" { state = \"available\" filter { name = \"opt-in-status\" values = [\"opt-in-not-required\"] } }\n"
+        + "   Then in aws_subnets: filter { name = \"availabilityZone\" values = data.aws_availability_zones.available.names }\n"
         + "4. Add lifecycle { ignore_changes = [tags, tags_all] } ONLY to resources that support tagging. NEVER add it to: aws_autoscaling_group, aws_s3_bucket_public_access_block, aws_s3_bucket_versioning, aws_s3_bucket_server_side_encryption_configuration, aws_iam_role_policy, aws_route53_record, aws_acm_certificate_validation\n"
         + "5. Ready to deploy with zero manual edits\n"
         + "6. NEVER use semicolons inside blocks — always use newlines between arguments\n"
@@ -1402,69 +1404,92 @@ def _auto_import_existing(full_path: str, error_output: str, failed_cmd: list, e
         (r'aws_db_instance\.\w+',
          r'DBInstanceAlreadyExists',
          r'identifier\s*=\s*"([^"]+)"'),
-        # ElastiCache
+        # ElastiCache cluster
         (r'aws_elasticache_cluster\.\w+',
          r'CacheClusterAlreadyExists',
          r'cluster_id\s*=\s*"([^"]+)"'),
+        # ElastiCache replication group
+        (r'aws_elasticache_replication_group\.\w+',
+         r'ReplicationGroupAlreadyExists',
+         r'replication_group_id\s*=\s*"([^"]+)"'),
+        # ECS Service
+        (r'aws_ecs_service\.\w+',
+         r'Creation of service was not idempotent|already exists',
+         r'name\s*=\s*"([^"]+)"'),
+        # API GW HTTP API
+        (r'aws_apigatewayv2_api\.\w+',
+         r'ConflictException|already exists',
+         r'name\s*=\s*"([^"]+)"'),
     ]
 
     # Resource type → boto3 import ID resolver
     IMPORT_ID_RESOLVERS = {
-        "aws_apigatewayv2_domain_name": lambda name, env: name,  # ID = domain name itself
-        "aws_lb":                        lambda name, env: _resolve_alb_arn(name, env),
-        "aws_ecs_cluster":               lambda name, env: name,
-        "aws_ecr_repository":            lambda name, env: name,
-        "aws_iam_role":                  lambda name, env: name,
-        "aws_s3_bucket":                 lambda name, env: name,
-        "aws_security_group":            lambda name, env: _resolve_sg_id(name, env),
-        "aws_db_instance":               lambda name, env: name,
-        "aws_elasticache_cluster":       lambda name, env: name,
+        "aws_apigatewayv2_domain_name":      lambda name, env: name,  # ID = domain name itself
+        "aws_lb":                             lambda name, env: _resolve_alb_arn(name, env),
+        "aws_ecs_cluster":                    lambda name, env: name,
+        "aws_ecs_service":                    lambda name, env: _resolve_ecs_service_id(name, env),
+        "aws_ecr_repository":                 lambda name, env: name,
+        "aws_iam_role":                       lambda name, env: name,
+        "aws_s3_bucket":                      lambda name, env: name,
+        "aws_security_group":                 lambda name, env: _resolve_sg_id(name, env),
+        "aws_db_instance":                    lambda name, env: name,
+        "aws_elasticache_cluster":            lambda name, env: name,
+        "aws_elasticache_replication_group":  lambda name, env: name,
+        "aws_apigatewayv2_api":               lambda name, env: _resolve_apigw2_id(name, env),
     }
+
+    # Read main.tf once
+    main_tf = os.path.join(full_path, "main.tf")
+    tf_content = ""
+    if os.path.exists(main_tf):
+        with open(main_tf, encoding="utf-8") as f:
+            tf_content = f.read()
+
+    # Extract -var flags from the failed command (reuse across all imports)
+    var_flags = []
+    for i, part in enumerate(failed_cmd):
+        if part == "-var" and i + 1 < len(failed_cmd):
+            var_flags += ["-var", failed_cmd[i+1]]
 
     imported = False
     for addr_pattern, err_pattern, name_pattern in ALREADY_EXISTS_PATTERNS:
         if not re.search(err_pattern, error_output, re.IGNORECASE):
             continue
-        addr_match = re.search(addr_pattern, error_output)
-        if not addr_match:
+        # Find ALL conflicting resource addresses (not just the first)
+        addr_matches = re.findall(addr_pattern, error_output)
+        if not addr_matches:
             continue
-        resource_addr = addr_match.group(0)
-        resource_type = resource_addr.split(".")[0]
+        # Deduplicate
+        seen_addrs = set()
+        for resource_addr in addr_matches:
+            if resource_addr in seen_addrs:
+                continue
+            seen_addrs.add(resource_addr)
+            resource_type = resource_addr.split(".")[0]
 
-        # Find the resource name from main.tf
-        main_tf = os.path.join(full_path, "main.tf")
-        if not os.path.exists(main_tf):
-            continue
-        with open(main_tf, encoding="utf-8") as f:
-            tf_content = f.read()
-        name_match = re.search(name_pattern, tf_content)
-        if not name_match:
-            continue
-        resource_name = name_match.group(1)
+            # Find the resource name from main.tf
+            name_match = re.search(name_pattern, tf_content)
+            if not name_match:
+                continue
+            resource_name = name_match.group(1)
 
-        # Resolve the AWS import ID
-        resolver = IMPORT_ID_RESOLVERS.get(resource_type)
-        if not resolver:
-            continue
-        try:
-            import_id = resolver(resource_name, env)
-        except Exception:
-            import_id = resource_name
+            # Resolve the AWS import ID
+            resolver = IMPORT_ID_RESOLVERS.get(resource_type)
+            if not resolver:
+                continue
+            try:
+                import_id = resolver(resource_name, env)
+            except Exception:
+                import_id = resource_name
 
-        if not import_id:
-            continue
+            if not import_id:
+                continue
 
-        # Extract -var flags from the failed command
-        var_flags = []
-        for i, part in enumerate(failed_cmd):
-            if part == "-var" and i + 1 < len(failed_cmd):
-                var_flags += ["-var", failed_cmd[i+1]]
-
-        result = subprocess.run(
-            ["terraform", "import", "-no-color"] + var_flags + [resource_addr, import_id],
-            cwd=full_path, env=env, capture_output=True, text=True
-        )
-        imported = True
+            subprocess.run(
+                ["terraform", "import", "-no-color"] + var_flags + [resource_addr, import_id],
+                cwd=full_path, env=env, capture_output=True, text=True
+            )
+            imported = True
 
     return imported
 
@@ -1496,6 +1521,42 @@ def _resolve_sg_id(name: str, env: dict) -> str:
         return name
 
 
+def _resolve_ecs_service_id(name: str, env: dict) -> str:
+    """Returns 'cluster/service' import ID for aws_ecs_service."""
+    try:
+        import boto3
+        client = boto3.client("ecs",
+            aws_access_key_id=env.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=env.get("AWS_SECRET_ACCESS_KEY"),
+            region_name=env.get("AWS_DEFAULT_REGION", "us-east-1"))
+        clusters = client.list_clusters()["clusterArns"]
+        for cluster_arn in clusters:
+            svcs = client.list_services(cluster=cluster_arn)["serviceArns"]
+            for svc_arn in svcs:
+                if svc_arn.split("/")[-1] == name:
+                    cluster_name = cluster_arn.split("/")[-1]
+                    return f"{cluster_name}/{name}"
+    except Exception:
+        pass
+    return name
+
+
+def _resolve_apigw2_id(name: str, env: dict) -> str:
+    try:
+        import boto3
+        client = boto3.client("apigatewayv2",
+            aws_access_key_id=env.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=env.get("AWS_SECRET_ACCESS_KEY"),
+            region_name=env.get("AWS_DEFAULT_REGION", "us-east-1"))
+        apis = client.get_apis()["Items"]
+        for api in apis:
+            if api.get("Name") == name:
+                return api["ApiId"]
+    except Exception:
+        pass
+    return name
+
+
 def run_terraform_streaming(full_path: str, commands: list, aws_creds: dict = None):
     cache_dir = os.path.join(os.path.expanduser("~"), ".terraform.d", "plugin-cache")
     os.makedirs(cache_dir, exist_ok=True)
@@ -1509,6 +1570,15 @@ def run_terraform_streaming(full_path: str, commands: list, aws_creds: dict = No
         env["AWS_ACCESS_KEY_ID"]     = aws_creds["access_key"]
         env["AWS_SECRET_ACCESS_KEY"] = aws_creds["secret_key"]
         env["AWS_DEFAULT_REGION"]    = aws_creds["region"]
+    # Remove stale Terraform state lock file if present — prevents "Error acquiring the state lock"
+    lock_file = os.path.join(full_path, ".terraform.tfstate.lock.info")
+    if os.path.exists(lock_file):
+        try:
+            os.remove(lock_file)
+            yield "data: ♻ Removed stale state lock file\n\n"
+        except Exception:
+            pass
+
     for cmd in commands:
         yield "data: \n\n"
         yield "data: === Running: " + " ".join(cmd) + " ===\n\n"
@@ -1551,11 +1621,14 @@ def run_terraform_streaming(full_path: str, commands: list, aws_creds: dict = No
                 yield "data: DEPLOY_FAILED\n\n"
                 return
         if last_returncode != 0:
-            # ── Auto-import on "already exists" errors ──────────────────────
+            # ── Auto-import on "already exists" errors — retry up to 5 times ──
             full_output = "\n".join(output_lines)
-            import_attempted = _auto_import_existing(full_path, full_output, cmd, env)
-            if import_attempted:
-                yield "data: ♻ Auto-imported existing resource — retrying apply...\n\n"
+            recovered = False
+            for _import_attempt in range(5):
+                import_attempted = _auto_import_existing(full_path, full_output, cmd, env)
+                if not import_attempted:
+                    break
+                yield f"data: ♻ Auto-imported existing resource(s) — retrying apply (attempt {_import_attempt+1}/5)...\n\n"
                 try:
                     process2 = subprocess.Popen(
                         cmd, cwd=full_path,
@@ -1563,16 +1636,23 @@ def run_terraform_streaming(full_path: str, commands: list, aws_creds: dict = No
                         text=True, bufsize=1, env=env,
                         encoding='utf-8', errors='replace'
                     )
+                    retry_lines = []
                     for line in process2.stdout:
                         line = line.rstrip()
                         if line:
+                            retry_lines.append(line)
                             yield "data: " + line + "\n\n"
                     process2.wait()
                     if process2.returncode == 0:
                         yield "data: SUCCESS: " + " ".join(cmd) + " completed!\n\n"
-                        continue
+                        recovered = True
+                        break
+                    # Still failing — check if new "already exists" errors appeared
+                    full_output = "\n".join(retry_lines)
                 except Exception:
-                    pass
+                    break
+            if recovered:
+                continue
             yield "data: ERROR: Command failed with code " + str(last_returncode) + "\n\n"
             yield "data: DEPLOY_FAILED\n\n"
             return
@@ -1754,27 +1834,37 @@ def deploy_terraform(resource: AWSResource, request: Request):
                 if r.get("type") not in _stale_types
             ]
 
+            # Detect actual resource names in main.tf (AI might use any name, not just "main")
+            def _find_tf_resource_name(tf_content, rtype):
+                """Return first resource name declared for given type, fallback to 'main'."""
+                m = re.search(r'resource\s+"' + re.escape(rtype) + r'"\s+"(\w+)"', tf_content)
+                return m.group(1) if m else "main"
+
+            _zone_tf_name = _find_tf_resource_name(_main_tf_content, "aws_route53_zone")
+            _cert_tf_name = _find_tf_resource_name(_main_tf_content, "aws_acm_certificate")
+            _apigw_tf_name = _find_tf_resource_name(_main_tf_content, "aws_apigatewayv2_domain_name")
+
             if existing_zone_id:
                 existing_state["resources"].append({
-                    "mode":"managed","type":"aws_route53_zone","name":"main","provider":provider,
+                    "mode":"managed","type":"aws_route53_zone","name":_zone_tf_name,"provider":provider,
                     "instances":[{"schema_version":0,"sensitive_attributes":[],"attributes":{
                         "id":existing_zone_id,"name":domain+".","comment":"Managed by Terraform",
                         "force_destroy":False,"tags":{},"tags_all":{},"vpc":[],"zone_id":existing_zone_id,
                         "primary_name_server":None,"name_servers":[],"arn":""
                     }}]
                 })
-                yield f"data: ✓ Zone {existing_zone_id} written to state\n\n"
+                yield f"data: ✓ Zone {existing_zone_id} written to state (resource name: {_zone_tf_name})\n\n"
 
             if existing_cert_arn:
                 existing_state["resources"].append({
-                    "mode":"managed","type":"aws_acm_certificate","name":"main","provider":provider,
+                    "mode":"managed","type":"aws_acm_certificate","name":_cert_tf_name,"provider":provider,
                     "instances":[{"schema_version":0,"sensitive_attributes":[],"attributes":{
                         "id":existing_cert_arn,"arn":existing_cert_arn,"domain_name":domain,
                         "validation_method":"DNS","subject_alternative_names":["*."+domain,domain],
                         "status":"ISSUED","tags":{},"tags_all":{},"domain_validation_options":[],"options":[]
                     }}]
                 })
-                yield f"data: ✓ ACM cert written to state\n\n"
+                yield f"data: ✓ ACM cert written to state (resource name: {_cert_tf_name})\n\n"
 
             # Inject existing API Gateway custom domain names if declared in main.tf
             if "aws_apigatewayv2_domain_name" in _main_tf_content and aws_creds and domain:
@@ -1788,7 +1878,7 @@ def deploy_terraform(resource: AWSResource, request: Request):
                         _dn = _d.get("DomainName","")
                         if _dn.endswith("." + domain) or _dn == domain:
                             existing_state["resources"].append({
-                                "mode":"managed","type":"aws_apigatewayv2_domain_name","name":"main",
+                                "mode":"managed","type":"aws_apigatewayv2_domain_name","name":_apigw_tf_name,
                                 "provider":provider,
                                 "instances":[{"schema_version":0,"sensitive_attributes":[],"attributes":{
                                     "id":_dn,"domain_name":_dn,"tags":{},"tags_all":{},
@@ -1812,8 +1902,8 @@ def deploy_terraform(resource: AWSResource, request: Request):
             phase1_failed = False
             for chunk in run_terraform_streaming(full_path, [
                 ["terraform", "apply", "-auto-approve", "-no-color",
-                 "-target=aws_acm_certificate.main",
-                 "-target=aws_route53_zone.main"] + tf_vars
+                 f"-target=aws_acm_certificate.{_cert_tf_name}",
+                 f"-target=aws_route53_zone.{_zone_tf_name}"] + tf_vars
             ], aws_creds=aws_creds):
                 if "DEPLOY_FAILED" in chunk:
                     phase1_failed = True
@@ -2107,10 +2197,14 @@ def boto3_destroy_resources(full_path: str, aws_creds: dict, region: str):
     except Exception as e:
         errors.append(f"IAM profile: {e}")
 
-    # 10. Delete IAM role policies then roles
+    # 10. Delete IAM role policies then roles (inline + managed)
     try:
         for role_id in get_ids("aws_iam_role"):
             try:
+                # Detach managed policies
+                managed = iam.list_attached_role_policies(RoleName=role_id)["AttachedPolicies"]
+                for p in managed:
+                    iam.detach_role_policy(RoleName=role_id, PolicyArn=p["PolicyArn"])
                 # Delete inline policies
                 policies = iam.list_role_policies(RoleName=role_id)["PolicyNames"]
                 for p in policies:
@@ -2138,6 +2232,131 @@ def boto3_destroy_resources(full_path: str, aws_creds: dict, region: str):
                     errors.append(f"S3 {bucket_id}: {e}")
     except Exception as e:
         errors.append(f"S3: {e}")
+
+    # 12a. Delete ECS services (scale to 0 first), then task definitions, then cluster
+    try:
+        ecs = session.client("ecs")
+        for cluster_id in get_ids("aws_ecs_cluster"):
+            try:
+                # List and delete all services in cluster
+                services_resp = ecs.list_services(cluster=cluster_id)
+                svc_arns = services_resp.get("serviceArns", [])
+                for svc_arn in svc_arns:
+                    try:
+                        ecs.update_service(cluster=cluster_id, service=svc_arn, desiredCount=0)
+                        ecs.delete_service(cluster=cluster_id, service=svc_arn, force=True)
+                        yield f"data: ✓ Deleted ECS service {svc_arn.split('/')[-1]}\n\n"
+                    except Exception as e:
+                        if "not found" not in str(e).lower():
+                            errors.append(f"ECS svc {svc_arn}: {e}")
+                # Also delete ECS services tracked directly in state
+                for svc_id in get_ids("aws_ecs_service"):
+                    parts = svc_id.split("/")
+                    svc_name = parts[-1] if parts else svc_id
+                    try:
+                        ecs.update_service(cluster=cluster_id, service=svc_name, desiredCount=0)
+                        ecs.delete_service(cluster=cluster_id, service=svc_name, force=True)
+                    except Exception:
+                        pass
+                ecs.delete_cluster(cluster=cluster_id)
+                yield f"data: ✓ Deleted ECS cluster {cluster_id}\n\n"
+            except Exception as e:
+                if "not found" not in str(e).lower():
+                    errors.append(f"ECS cluster {cluster_id}: {e}")
+    except Exception as e:
+        errors.append(f"ECS: {e}")
+
+    # 12b. Delete RDS instances (skip final snapshot)
+    try:
+        rds = session.client("rds")
+        for db_id in get_ids("aws_db_instance"):
+            try:
+                rds.delete_db_instance(DBInstanceIdentifier=db_id, SkipFinalSnapshot=True, DeleteAutomatedBackups=True)
+                yield f"data: ✓ Deleting RDS instance {db_id} (takes a few minutes)\n\n"
+            except Exception as e:
+                if "not found" not in str(e).lower() and "DBInstanceNotFound" not in str(e):
+                    errors.append(f"RDS {db_id}: {e}")
+        for cluster_id in get_ids("aws_rds_cluster"):
+            try:
+                # Delete all cluster instances first
+                cluster_info = rds.describe_db_clusters(DBClusterIdentifier=cluster_id)
+                for member in cluster_info["DBClusters"][0].get("DBClusterMembers", []):
+                    try:
+                        rds.delete_db_instance(DBInstanceIdentifier=member["DBInstanceIdentifier"], SkipFinalSnapshot=True)
+                    except Exception:
+                        pass
+                rds.delete_db_cluster(DBClusterIdentifier=cluster_id, SkipFinalSnapshot=True)
+                yield f"data: ✓ Deleting Aurora cluster {cluster_id}\n\n"
+            except Exception as e:
+                if "not found" not in str(e).lower():
+                    errors.append(f"Aurora {cluster_id}: {e}")
+    except Exception as e:
+        errors.append(f"RDS: {e}")
+
+    # 12c. Delete ECR repositories (force delete all images)
+    try:
+        ecr = session.client("ecr")
+        for repo_id in get_ids("aws_ecr_repository"):
+            try:
+                ecr.delete_repository(repositoryName=repo_id, force=True)
+                yield f"data: ✓ Deleted ECR repository {repo_id}\n\n"
+            except Exception as e:
+                if "RepositoryNotFoundException" not in str(e):
+                    errors.append(f"ECR {repo_id}: {e}")
+    except Exception as e:
+        errors.append(f"ECR: {e}")
+
+    # 12d. Delete ElastiCache clusters and replication groups
+    try:
+        ec_client = session.client("elasticache")
+        for cluster_id in get_ids("aws_elasticache_cluster"):
+            try:
+                ec_client.delete_cache_cluster(CacheClusterId=cluster_id)
+                yield f"data: ✓ Deleted ElastiCache cluster {cluster_id}\n\n"
+            except Exception as e:
+                if "not found" not in str(e).lower() and "CacheClusterNotFound" not in str(e):
+                    errors.append(f"ElastiCache {cluster_id}: {e}")
+        for rg_id in get_ids("aws_elasticache_replication_group"):
+            try:
+                ec_client.delete_replication_group(ReplicationGroupId=rg_id, RetainPrimaryCluster=False)
+                yield f"data: ✓ Deleted ElastiCache replication group {rg_id}\n\n"
+            except Exception as e:
+                if "not found" not in str(e).lower():
+                    errors.append(f"ElastiCache RG {rg_id}: {e}")
+    except Exception as e:
+        errors.append(f"ElastiCache: {e}")
+
+    # 12e. Delete API Gateway HTTP/REST APIs
+    try:
+        apigw2 = session.client("apigatewayv2")
+        for api_id in get_ids("aws_apigatewayv2_api"):
+            try:
+                apigw2.delete_api(ApiId=api_id)
+                yield f"data: ✓ Deleted API Gateway HTTP API {api_id}\n\n"
+            except Exception as e:
+                if "not found" not in str(e).lower():
+                    errors.append(f"APIGW2 {api_id}: {e}")
+        # Delete custom domain names
+        for dn_id in get_ids("aws_apigatewayv2_domain_name"):
+            try:
+                apigw2.delete_domain_name(DomainName=dn_id)
+                yield f"data: ✓ Deleted API GW domain {dn_id}\n\n"
+            except Exception as e:
+                if "not found" not in str(e).lower():
+                    errors.append(f"APIGW2 domain {dn_id}: {e}")
+    except Exception as e:
+        errors.append(f"APIGW2: {e}")
+    try:
+        apigw1 = session.client("apigateway")
+        for rest_id in get_ids("aws_api_gateway_rest_api"):
+            try:
+                apigw1.delete_rest_api(restApiId=rest_id)
+                yield f"data: ✓ Deleted REST API {rest_id}\n\n"
+            except Exception as e:
+                if "not found" not in str(e).lower():
+                    errors.append(f"APIGWv1 {rest_id}: {e}")
+    except Exception as e:
+        errors.append(f"APIGWv1: {e}")
 
     # 12. Delete ACM certificates
     try:
@@ -2222,12 +2441,14 @@ def destroy_all(request: Request):
             ) if aws_creds else boto3.Session(region_name=region)
             ec2c = session.client("ec2")
 
-            # Find all non-default SGs
-            all_sgs = ec2c.describe_security_groups(
-                Filters=[{"Name": "description", "Values": ["*ALB*","*EC2*","*ECS*","*security group*"]}]
-            )["SecurityGroups"]
-            # Filter out default SGs
-            target_sgs = [sg for sg in all_sgs if sg["GroupName"] != "default"]
+            # Find all non-default SGs (no description filter — catch all project SGs)
+            all_sgs_resp = ec2c.describe_security_groups()["SecurityGroups"]
+            # Filter out default SGs and keep only ones that look project-generated
+            target_sgs = [
+                sg for sg in all_sgs_resp
+                if sg["GroupName"] != "default" and sg.get("GroupName", "").startswith("devopsai") or
+                any(kw in sg.get("Description","").lower() for kw in ["alb","ec2","ecs","eks","fargate","devops"])
+            ]
 
             for sg in target_sgs:
                 sg_id = sg["GroupId"]
