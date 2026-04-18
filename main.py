@@ -913,7 +913,7 @@ def generate_terraform(resource: AWSResource, request: Request):
         + "\n\nRULES:\n"
         + "1. All variables MUST have default values\n"
         + "2. For EC2 Ubuntu 22.04 us-east-1 use AMI: ami-0c7217cdde317cfec\n"
-        + "3. Use default VPC and subnets if none specified\n"
+        + "3. Use default VPC and subnets if none specified. For subnets data source ALWAYS add a filter to exclude us-east-1e: filter { name = \"availability-zone\" values = [\"us-east-1a\", \"us-east-1b\", \"us-east-1c\", \"us-east-1d\", \"us-east-1f\"] }\n"
         + "4. Add lifecycle { ignore_changes = [tags, tags_all] } ONLY to resources that support tagging. NEVER add it to: aws_autoscaling_group, aws_s3_bucket_public_access_block, aws_s3_bucket_versioning, aws_s3_bucket_server_side_encryption_configuration, aws_iam_role_policy, aws_route53_record, aws_acm_certificate_validation\n"
         + "5. Ready to deploy with zero manual edits\n"
         + "6. NEVER use semicolons inside blocks — always use newlines between arguments\n"
@@ -1448,11 +1448,70 @@ def deploy_terraform(resource: AWSResource, request: Request):
                                       "cert_validation" in _content)
 
         if has_acm_validation:
-            # Phase 1: create ACM cert + Route53 zone so validation options become known
             yield "data: === Phase 1: Creating ACM certificate and Route53 zone ===\n\n"
+
+            # ── Reuse existing Route53 zone + ACM cert if they already exist ──
+            tf_env = os.environ.copy()
+            if aws_creds:
+                tf_env["AWS_ACCESS_KEY_ID"]     = aws_creds["access_key"]
+                tf_env["AWS_SECRET_ACCESS_KEY"] = aws_creds["secret_key"]
+                tf_env["AWS_DEFAULT_REGION"]    = aws_creds["region"]
+
+            existing_zone_id  = None
+            existing_cert_arn = None
+            try:
+                import boto3 as _boto3
+                _r53 = _boto3.client("route53",
+                    aws_access_key_id=aws_creds["access_key"],
+                    aws_secret_access_key=aws_creds["secret_key"],
+                    region_name=aws_creds["region"]) if aws_creds else _boto3.client("route53")
+                _zones = _r53.list_hosted_zones_by_name(DNSName=domain or "", MaxItems="10")
+                for _z in _zones.get("HostedZones", []):
+                    if _z["Name"].rstrip(".") == (domain or "").rstrip("."):
+                        existing_zone_id = _z["Id"].split("/")[-1]
+                        break
+            except Exception as _e:
+                yield f"data: ⚠ Could not check Route53: {_e}\n\n"
+
+            try:
+                import boto3 as _boto3
+                _acm = _boto3.client("acm",
+                    aws_access_key_id=aws_creds["access_key"],
+                    aws_secret_access_key=aws_creds["secret_key"],
+                    region_name=aws_creds["region"]) if aws_creds else _boto3.client("acm", region_name="us-east-1")
+                _paginator = _acm.get_paginator("list_certificates")
+                for _page in _paginator.paginate(CertificateStatuses=["ISSUED", "PENDING_VALIDATION"]):
+                    for _c in _page.get("CertificateSummaryList", []):
+                        if _c.get("DomainName") == (domain or ""):
+                            existing_cert_arn = _c["CertificateArn"]
+                            break
+                    if existing_cert_arn:
+                        break
+            except Exception as _e:
+                yield f"data: ⚠ Could not check ACM: {_e}\n\n"
+
+            # Init first (needed before import)
+            for chunk in run_terraform_streaming(full_path, [
+                ["terraform", "init", "-no-color"]
+            ], aws_creds=aws_creds):
+                yield chunk
+
+            # Import existing resources so Terraform won't recreate them
+            if existing_zone_id:
+                yield f"data: ♻ Reusing existing Route53 zone: {existing_zone_id}\n\n"
+                subprocess.run(
+                    ["terraform", "import", "-no-color"] + tf_vars + ["aws_route53_zone.main", existing_zone_id],
+                    cwd=full_path, env=tf_env, capture_output=True, text=True
+                )
+            if existing_cert_arn:
+                yield f"data: ♻ Reusing existing ACM certificate: {existing_cert_arn[-36:]}\n\n"
+                subprocess.run(
+                    ["terraform", "import", "-no-color"] + tf_vars + ["aws_acm_certificate.main", existing_cert_arn],
+                    cwd=full_path, env=tf_env, capture_output=True, text=True
+                )
+
             phase1_failed = False
             for chunk in run_terraform_streaming(full_path, [
-                ["terraform", "init", "-no-color"],
                 ["terraform", "apply", "-auto-approve", "-no-color",
                  "-target=aws_acm_certificate.main",
                  "-target=aws_route53_zone.main"] + tf_vars
