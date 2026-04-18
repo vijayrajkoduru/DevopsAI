@@ -1960,38 +1960,30 @@ def deploy_terraform(resource: AWSResource, request: Request):
             if phase1_failed:
                 return
 
-            # ── Pre-Phase-2: import any existing resources that would cause conflicts ──
-            # Run terraform plan first and import any resources that "already exist"
+            # ── Pre-Phase-2: delete any API mappings that would cause 409 conflict ──
+            # Deleting is safer than importing — Terraform will recreate them cleanly
             if aws_creds and domain and "aws_apigatewayv2_api_mapping" in _main_tf_content:
                 try:
                     _pre_apigw = _boto3.client("apigatewayv2",
                         aws_access_key_id=aws_creds["access_key"],
                         aws_secret_access_key=aws_creds["secret_key"],
                         region_name=aws_creds["region"])
-                    # Find all domain names for this domain and import their mappings
                     _all_doms = _pre_apigw.get_domain_names().get("Items", [])
                     for _pd in _all_doms:
                         _pdn = _pd.get("DomainName","")
                         if _pdn.endswith("." + domain) or _pdn == domain:
                             _pmappings = _pre_apigw.get_api_mappings(DomainName=_pdn).get("Items", [])
-                            _map_tf_name = _find_tf_resource_name(_main_tf_content, "aws_apigatewayv2_api_mapping")
                             for _pm in _pmappings:
-                                _import_id = f"{_pdn}/{_pm['ApiMappingId']}"
-                                _import_addr = f"aws_apigatewayv2_api_mapping.{_map_tf_name}"
-                                _tf_env = os.environ.copy()
-                                _tf_env["AWS_ACCESS_KEY_ID"]     = aws_creds["access_key"]
-                                _tf_env["AWS_SECRET_ACCESS_KEY"] = aws_creds["secret_key"]
-                                _tf_env["AWS_DEFAULT_REGION"]    = aws_creds["region"]
-                                _imp = subprocess.run(
-                                    ["terraform", "import", "-no-color"] + tf_vars + [_import_addr, _import_id],
-                                    cwd=full_path, env=_tf_env, capture_output=True, text=True
-                                )
-                                if _imp.returncode == 0:
-                                    yield f"data: ✓ Pre-imported API mapping {_pm['ApiMappingId']} for {_pdn}\n\n"
-                                else:
-                                    yield f"data: ⚠ Mapping import attempt: {_imp.stderr[:200]}\n\n"
+                                try:
+                                    _pre_apigw.delete_api_mapping(
+                                        DomainName=_pdn,
+                                        ApiMappingId=_pm["ApiMappingId"]
+                                    )
+                                    yield f"data: ♻ Deleted stale API mapping {_pm['ApiMappingId']} for {_pdn} — will be recreated\n\n"
+                                except Exception as _dme:
+                                    yield f"data: ⚠ Could not delete mapping {_pm['ApiMappingId']}: {_dme}\n\n"
                 except Exception as _pie:
-                    yield f"data: ⚠ Pre-import check: {_pie}\n\n"
+                    yield f"data: ⚠ Pre-Phase-2 mapping cleanup: {_pie}\n\n"
 
             yield "data: === Phase 2: Creating all remaining resources ===\n\n"
             yield from run_terraform_streaming(full_path, [
