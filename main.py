@@ -950,7 +950,7 @@ def generate_terraform(resource: AWSResource, request: Request):
         + "5. Ready to deploy with zero manual edits\n"
         + "6. NEVER use semicolons inside blocks — always use newlines between arguments\n"
         + "7. NEVER write single-line blocks like `ingress { a=1; b=2 }` — always expand to multi-line\n"
-        + "8. Use resource \"aws_route53_zone\" to CREATE the zone, never data source\n"
+        + "8. For Route53 zone ALWAYS use resource \"aws_route53_zone\" \"main\" (not data source). The deploy system handles deduplication automatically.\n"
         + "9. ALWAYS add allow_overwrite = true to every aws_route53_record resource\n"
         + "10. For cert_validation for_each, use this EXACT pattern to handle duplicate keys from wildcard+root certs:\n"
         + "    for_each = { for dvo in aws_acm_certificate.main.domain_validation_options : dvo.resource_record_name => { name=dvo.resource_record_name, record=dvo.resource_record_value, type=dvo.resource_record_type }... }\n"
@@ -1480,67 +1480,90 @@ def deploy_terraform(resource: AWSResource, request: Request):
                                       "cert_validation" in _content)
 
         if has_acm_validation:
-            yield "data: === Phase 1: Creating ACM certificate and Route53 zone ===\n\n"
+            yield "data: === Phase 1: ACM Certificate + Route53 Zone ===\n\n"
 
-            # ── Reuse existing Route53 zone + ACM cert if they already exist ──
             tf_env = os.environ.copy()
             if aws_creds:
                 tf_env["AWS_ACCESS_KEY_ID"]     = aws_creds["access_key"]
                 tf_env["AWS_SECRET_ACCESS_KEY"] = aws_creds["secret_key"]
                 tf_env["AWS_DEFAULT_REGION"]    = aws_creds["region"]
 
+            # ── Step 1: Delete ALL duplicate Route53 zones, keep only one ──
             existing_zone_id  = None
             existing_cert_arn = None
-            try:
-                import boto3 as _boto3
-                _r53 = _boto3.client("route53",
-                    aws_access_key_id=aws_creds["access_key"],
-                    aws_secret_access_key=aws_creds["secret_key"],
-                    region_name=aws_creds["region"]) if aws_creds else _boto3.client("route53")
-                _zones = _r53.list_hosted_zones_by_name(DNSName=domain or "", MaxItems="10")
-                for _z in _zones.get("HostedZones", []):
-                    if _z["Name"].rstrip(".") == (domain or "").rstrip("."):
-                        existing_zone_id = _z["Id"].split("/")[-1]
-                        break
-            except Exception as _e:
-                yield f"data: ⚠ Could not check Route53: {_e}\n\n"
+            if domain and aws_creds:
+                try:
+                    import boto3 as _boto3
+                    _r53 = _boto3.client("route53",
+                        aws_access_key_id=aws_creds["access_key"],
+                        aws_secret_access_key=aws_creds["secret_key"],
+                        region_name=aws_creds["region"])
+                    _all_zones = []
+                    _paginator = _r53.get_paginator("list_hosted_zones")
+                    for _page in _paginator.paginate():
+                        for _z in _page["HostedZones"]:
+                            if _z["Name"].rstrip(".") == domain.rstrip("."):
+                                _all_zones.append(_z)
+                    if _all_zones:
+                        # Keep zone with most records (most likely the real one)
+                        def _record_count(z):
+                            try:
+                                return int(z.get("ResourceRecordSetCount", 0))
+                            except Exception:
+                                return 0
+                        _all_zones.sort(key=_record_count, reverse=True)
+                        keep_zone = _all_zones[0]
+                        existing_zone_id = keep_zone["Id"].split("/")[-1]
+                        yield f"data: ♻ Keeping Route53 zone {existing_zone_id} ({_record_count(keep_zone)} records)\n\n"
+                        # Delete all others
+                        for _dup in _all_zones[1:]:
+                            _dup_id = _dup["Id"].split("/")[-1]
+                            try:
+                                _recs = _r53.list_resource_record_sets(HostedZoneId=_dup_id)["ResourceRecordSets"]
+                                _del = [r for r in _recs if r["Type"] not in ("NS","SOA")]
+                                if _del:
+                                    _r53.change_resource_record_sets(HostedZoneId=_dup_id,
+                                        ChangeBatch={"Changes":[{"Action":"DELETE","ResourceRecordSet":r} for r in _del]})
+                                _r53.delete_hosted_zone(Id=_dup_id)
+                                yield f"data: 🗑 Deleted duplicate zone {_dup_id}\n\n"
+                            except Exception as _de:
+                                yield f"data: ⚠ Could not delete duplicate zone {_dup_id}: {_de}\n\n"
+                except Exception as _e:
+                    yield f"data: ⚠ Route53 cleanup error: {_e}\n\n"
 
-            try:
-                import boto3 as _boto3
-                _acm = _boto3.client("acm",
-                    aws_access_key_id=aws_creds["access_key"],
-                    aws_secret_access_key=aws_creds["secret_key"],
-                    region_name=aws_creds["region"]) if aws_creds else _boto3.client("acm", region_name="us-east-1")
-                _paginator = _acm.get_paginator("list_certificates")
-                for _page in _paginator.paginate(CertificateStatuses=["ISSUED", "PENDING_VALIDATION"]):
-                    for _c in _page.get("CertificateSummaryList", []):
-                        if _c.get("DomainName") == (domain or ""):
-                            existing_cert_arn = _c["CertificateArn"]
+                # ── Step 2: Find existing ISSUED/PENDING ACM cert ──
+                try:
+                    _acm = _boto3.client("acm",
+                        aws_access_key_id=aws_creds["access_key"],
+                        aws_secret_access_key=aws_creds["secret_key"],
+                        region_name=aws_creds["region"])
+                    _cpag = _acm.get_paginator("list_certificates")
+                    for _page in _cpag.paginate(CertificateStatuses=["ISSUED","PENDING_VALIDATION"]):
+                        for _c in _page.get("CertificateSummaryList", []):
+                            if _c.get("DomainName","").rstrip(".") == domain.rstrip("."):
+                                existing_cert_arn = _c["CertificateArn"]
+                                break
+                        if existing_cert_arn:
                             break
                     if existing_cert_arn:
-                        break
-            except Exception as _e:
-                yield f"data: ⚠ Could not check ACM: {_e}\n\n"
+                        yield f"data: ♻ Reusing ACM cert {existing_cert_arn[-36:]}\n\n"
+                except Exception as _e:
+                    yield f"data: ⚠ ACM check error: {_e}\n\n"
 
-            # Init first (needed before import)
+            # ── Step 3: terraform init then import existing resources ──
             for chunk in run_terraform_streaming(full_path, [
                 ["terraform", "init", "-no-color"]
             ], aws_creds=aws_creds):
                 yield chunk
 
-            # Import existing resources so Terraform won't recreate them
             if existing_zone_id:
-                yield f"data: ♻ Reusing existing Route53 zone: {existing_zone_id}\n\n"
                 subprocess.run(
                     ["terraform", "import", "-no-color"] + tf_vars + ["aws_route53_zone.main", existing_zone_id],
-                    cwd=full_path, env=tf_env, capture_output=True, text=True
-                )
+                    cwd=full_path, env=tf_env, capture_output=True, text=True)
             if existing_cert_arn:
-                yield f"data: ♻ Reusing existing ACM certificate: {existing_cert_arn[-36:]}\n\n"
                 subprocess.run(
                     ["terraform", "import", "-no-color"] + tf_vars + ["aws_acm_certificate.main", existing_cert_arn],
-                    cwd=full_path, env=tf_env, capture_output=True, text=True
-                )
+                    cwd=full_path, env=tf_env, capture_output=True, text=True)
 
             phase1_failed = False
             for chunk in run_terraform_streaming(full_path, [
