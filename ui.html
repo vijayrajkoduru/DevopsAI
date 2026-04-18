@@ -369,7 +369,6 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a12;color:#e0e0e0;he
         <button class="tbb" onclick="toggleTbMore()" title="More actions">••• More</button>
         <div class="tb-more-drop" id="tb-more-drop">
           <div class="tb-more-item" id="github-push-topbar-btn" onclick="openGitHubPush();closeTbMore()" style="color:#3fb950">🐙 Push to GitHub</div>
-          <div class="tb-more-item" onclick="openGitHubImport();closeTbMore()" style="color:#60a5fa">📥 Import from GitHub</div>
           <div class="tb-more-item" onclick="exportCfg();closeTbMore()">↓ Export Config</div>
         </div>
       </div>
@@ -3682,7 +3681,7 @@ function closeSettings() {
 
 // ── CREDENTIALS VAULT ─────────────────────────────────────────────────────────
 function switchVaultTab(tab) {
-  ['aws','github','docker','domain'].forEach(function(t) {
+  ['aws','github','docker','domain','anthropic'].forEach(function(t) {
     document.getElementById('vpanel-'+t).style.display = t===tab ? '' : 'none';
     var el = document.getElementById('vtab-'+t);
     if (t===tab) el.classList.add('active'); else el.classList.remove('active');
@@ -3757,7 +3756,7 @@ async function loadVaultStatus() {
   try {
     var r = await fetch('/vault/all/status');
     var d = await r.json();
-    ['aws','github','docker','domain'].forEach(function(s) {
+    ['aws','github','docker','domain','anthropic'].forEach(function(s) {
       var dot = document.getElementById('vst-'+s);
       if (dot) dot.className = 'vault-status ' + (d[s] ? 'ok' : 'warn');
       var ddDot = document.getElementById('dd-st-'+s);
@@ -3996,6 +3995,7 @@ async function doGitHubPush() {
       <div class="vault-tab" id="vtab-github" onclick="switchVaultTab('github')">🐙 GitHub <span class="vault-status warn" id="vst-github"></span></div>
       <div class="vault-tab" id="vtab-docker" onclick="switchVaultTab('docker')">🐳 Docker <span class="vault-status warn" id="vst-docker"></span></div>
       <div class="vault-tab" id="vtab-domain" onclick="switchVaultTab('domain')">🌐 Domain <span class="vault-status warn" id="vst-domain"></span></div>
+      <div class="vault-tab" id="vtab-anthropic" onclick="switchVaultTab('anthropic')">🤖 Anthropic <span class="vault-status warn" id="vst-anthropic"></span></div>
     </div>
 
     <!-- AWS Tab -->
@@ -4072,6 +4072,16 @@ async function doGitHubPush() {
       <div id="v-dm-msg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:7px;font-size:12px"></div>
     </div>
 
+    <!-- Anthropic Tab -->
+    <div id="vpanel-anthropic" style="display:none">
+      <div style="margin-bottom:10px"><label class="vault-lbl">Anthropic API Key</label><input id="v-an-key" type="password" placeholder="sk-ant-api03-..." class="vault-inp"></div>
+      <div style="font-size:11px;color:#555;margin-bottom:14px">Get your API key at: <a href="https://console.anthropic.com/keys" target="_blank" style="color:#a78bfa">console.anthropic.com/keys</a> — used for all AI features (Arch Agent, Code Generator, Chat)</div>
+      <div style="display:flex;gap:8px">
+        <button onclick="saveVaultService('anthropic',{api_key:document.getElementById('v-an-key').value},'v-an-msg')" style="flex:1;padding:10px;background:linear-gradient(135deg,#5b21b6,#7c3aed);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">💾 Save API Key</button>
+        <button onclick="deleteVaultService('anthropic','v-an-msg')" style="padding:10px 14px;background:#13131f;border:1px solid #3a1a1a;border-radius:8px;color:#f87171;font-size:13px;cursor:pointer">✕ Clear</button>
+      </div>
+      <div id="v-an-msg" style="display:none;margin-top:10px;padding:9px 12px;border-radius:7px;font-size:12px"></div>
+    </div>
 
     <div style="margin-top:16px;padding:10px 12px;background:#0a0a14;border-radius:7px;font-size:11px;color:#444;line-height:1.7">
       🔒 All credentials are stored securely in the database per user account and never shared. They are auto-injected when you Generate, Deploy, or Push to GitHub.
