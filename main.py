@@ -854,12 +854,43 @@ def generate_terraform(resource: AWSResource, request: Request):
     connected     = cfg.get("connected_resources", [])
     conn_ids      = [c.get("type","") for c in connected]
     has_docker    = any("docker" in c for c in conn_ids)
+    has_k8s       = any("k8s" in c or "eks" in c or "helm" in c for c in conn_ids)
     has_s3_conn   = any("s3" in c for c in conn_ids)
     has_rds_conn  = any("rds" in c or "aurora" in c for c in conn_ids)
     has_redis_conn= any("redis" in c or "elasticache" in c for c in conn_ids)
 
+    # ── Smart container upgrade ────────────────────────────────────────────────
+    # If ec2_instance/ec2_asg is used as a microservice (has Docker or label ends in -service),
+    # automatically generate ECS Fargate or EKS instead of raw EC2+ASG.
+    label_lower = (cfg.get("name") or resource.resource_type or "").lower()
+    is_microservice = (
+        has_docker or
+        any(kw in label_lower for kw in ("service", "api", "worker", "backend", "frontend", "app"))
+    )
+    effective_type = resource.resource_type
+    upgrade_note   = ""
+    if resource.resource_type in ("ec2_instance", "ec2_asg") and is_microservice:
+        if has_k8s:
+            effective_type = "eks_cluster"
+            upgrade_note   = (
+                "\n\n⚡ SMART UPGRADE: This microservice is connected to Kubernetes. "
+                "Generate EKS + Kubernetes Deployment + Service + Ingress (NOT EC2/ASG). "
+                "Use ECR for the container image. Include HPA for autoscaling.\n"
+            )
+        else:
+            effective_type = "ecs_fargate"
+            upgrade_note   = (
+                "\n\n⚡ SMART UPGRADE: This is a microservice with Docker. "
+                "Generate ECS Fargate Task Definition + Service + ALB (NOT EC2/ASG). "
+                "Use aws_ecs_cluster, aws_ecs_task_definition (Fargate launch type), "
+                "aws_ecs_service, aws_lb, aws_lb_target_group (ip target type), "
+                "aws_lb_listener for HTTP→HTTPS redirect and HTTPS forward. "
+                "Use awsvpc network mode. Include aws_appautoscaling_target + aws_appautoscaling_policy for scaling. "
+                "Do NOT create any aws_launch_template or aws_autoscaling_group.\n"
+            )
+
     conn_section = ""
-    if resource.resource_type in ("ec2_instance", "ec2_asg") and (has_docker or has_s3_conn):
+    if effective_type in ("ec2_instance", "ec2_asg") and (has_docker or has_s3_conn):
         conn_section = "\n\nCONNECTED RESOURCES (implement ALL of these automatically):\n"
         if has_docker:
             conn_section += (
@@ -904,11 +935,12 @@ def generate_terraform(resource: AWSResource, request: Request):
     )
 
     prompt = (
-        "Generate complete production-ready Terraform code for " + resource.resource_type + ".\n"
+        "Generate complete production-ready Terraform code for " + effective_type + ".\n"
         + f"Domain: {domain_name}\n"
         + (f"Namespace: {namespace}\n" if namespace else "")
         + "Config: " + config_str
         + req_section
+        + upgrade_note
         + conn_section
         + "\n\nRULES:\n"
         + "1. All variables MUST have default values\n"
@@ -1695,21 +1727,101 @@ def boto3_destroy_resources(full_path: str, aws_creds: dict, region: str):
     except Exception as e:
         errors.append(f"LT delete: {e}")
 
-    # 7. Wait a bit for ASG instances to start terminating before deleting SGs
-    yield "data: ⏳ Waiting 15s for ASG instances to begin termination...\n\n"
-    time.sleep(15)
-
-    # 8. Delete Security Groups
-    try:
-        for sg_id in get_ids("aws_security_group"):
+    # 7. Wait for ASG instances to fully terminate (poll up to 8 min)
+    asg_ids = get_ids("aws_autoscaling_group")
+    if asg_ids:
+        yield "data: ⏳ Waiting for ASG instances to terminate (up to 8 min)...\n\n"
+        for _attempt in range(48):  # 48 x 10s = 8 min
             try:
-                ec2.delete_security_group(GroupId=sg_id)
-                yield f"data: ✓ Deleted security group {sg_id}\n\n"
-            except Exception as e:
-                if "not found" not in str(e).lower() and "InvalidGroup" not in str(e):
-                    errors.append(f"SG {sg_id}: {e}")
-    except Exception as e:
-        errors.append(f"SG delete: {e}")
+                pending = ec2.describe_instances(Filters=[
+                    {"Name": "instance-state-name",
+                     "Values": ["pending","running","stopping","shutting-down"]},
+                    {"Name": f"tag:aws:autoscaling:groupName",
+                     "Values": asg_ids}
+                ])["Reservations"]
+                if not pending:
+                    yield "data: ✓ All ASG instances terminated\n\n"
+                    break
+                count = sum(len(r["Instances"]) for r in pending)
+                yield f"data: ⏳ Still {count} instance(s) terminating...\n\n"
+            except Exception:
+                pass
+            time.sleep(10)
+    else:
+        yield "data: ⏳ Waiting 15s before deleting security groups...\n\n"
+        time.sleep(15)
+
+    # 8. Delete Security Groups — with ENI cleanup + rule revocation + retries
+    sg_ids = get_ids("aws_security_group")
+    if sg_ids:
+        # Step 8a: revoke all cross-SG rules so they don't block each other
+        for sg_id in sg_ids:
+            try:
+                sg_info = ec2.describe_security_groups(GroupIds=[sg_id])["SecurityGroups"]
+                if not sg_info:
+                    continue
+                sg_obj = sg_info[0]
+                if sg_obj.get("IpPermissions"):
+                    try:
+                        ec2.revoke_security_group_ingress(
+                            GroupId=sg_id, IpPermissions=sg_obj["IpPermissions"])
+                    except Exception:
+                        pass
+                if sg_obj.get("IpPermissionsEgress"):
+                    try:
+                        ec2.revoke_security_group_egress(
+                            GroupId=sg_id, IpPermissions=sg_obj["IpPermissionsEgress"])
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # Step 8b: delete any ENIs still attached to these SGs
+        for sg_id in sg_ids:
+            try:
+                enis = ec2.describe_network_interfaces(
+                    Filters=[{"Name": "group-id", "Values": [sg_id]}]
+                )["NetworkInterfaces"]
+                for eni in enis:
+                    attachment = eni.get("Attachment", {})
+                    if attachment.get("AttachmentId") and attachment.get("Status") != "detached":
+                        try:
+                            ec2.detach_network_interface(
+                                AttachmentId=attachment["AttachmentId"], Force=True)
+                            time.sleep(3)
+                        except Exception:
+                            pass
+                    try:
+                        ec2.delete_network_interface(
+                            NetworkInterfaceId=eni["NetworkInterfaceId"])
+                        yield f"data: ✓ Deleted ENI {eni['NetworkInterfaceId']} from {sg_id}\n\n"
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # Step 8c: retry SG deletion up to 5 times with backoff
+        remaining_sgs = list(sg_ids)
+        for attempt in range(5):
+            still_failing = []
+            for sg_id in remaining_sgs:
+                try:
+                    ec2.delete_security_group(GroupId=sg_id)
+                    yield f"data: ✓ Deleted security group {sg_id}\n\n"
+                except Exception as e:
+                    err_str = str(e)
+                    if "InvalidGroup.NotFound" in err_str or "not found" in err_str.lower():
+                        yield f"data: ✓ Security group {sg_id} already gone\n\n"
+                    else:
+                        still_failing.append(sg_id)
+            remaining_sgs = still_failing
+            if not remaining_sgs:
+                break
+            wait = (attempt + 1) * 15
+            yield f"data: ⏳ {len(remaining_sgs)} SG(s) still have dependencies, retrying in {wait}s...\n\n"
+            time.sleep(wait)
+        for sg_id in remaining_sgs:
+            errors.append(f"SG {sg_id}: still has dependencies after retries")
 
     # 9. Delete IAM instance profiles (detach role first)
     try:
@@ -1798,6 +1910,103 @@ def boto3_destroy_resources(full_path: str, aws_creds: dict, region: str):
             yield f"data: ⚠ {err}\n\n"
     else:
         yield "data: ✓ All resources deleted successfully\n\n"
+
+
+@app.post("/destroy/all")
+@limiter.limit("3/minute")
+def destroy_all(request: Request):
+    """Nuclear destroy — wipe every generated service folder + stray AWS resources."""
+    require_auth(request)
+    user = get_current_user(request)
+    aws_creds = get_user_aws_creds(user["id"]) if user else None
+    region = "us-east-1"
+    if aws_creds:
+        region = aws_creds.get("region", "us-east-1")
+
+    def run():
+        import boto3, time
+        yield "data: === NUCLEAR DESTROY — All Services ===\n\n"
+
+        # 1. Destroy each service folder that has a state file
+        if os.path.exists(OUTPUT_DIR):
+            folders = sorted([
+                f for f in os.listdir(OUTPUT_DIR)
+                if os.path.isdir(os.path.join(OUTPUT_DIR, f))
+                and os.path.exists(os.path.join(OUTPUT_DIR, f, "terraform.tfstate"))
+            ])
+            yield f"data: Found {len(folders)} service(s) with state files\n\n"
+            for folder in folders:
+                full_path = os.path.join(OUTPUT_DIR, folder)
+                yield f"data: \n\ndata: ── Destroying: {folder} ──\n\n"
+                yield from boto3_destroy_resources(full_path, aws_creds, region)
+                # Clear state
+                for sf in ["terraform.tfstate", "terraform.tfstate.backup"]:
+                    sp = os.path.join(full_path, sf)
+                    if os.path.exists(sp):
+                        os.remove(sp)
+
+        # 2. Stray SG cleanup — delete any SG tagged or named by this project
+        yield "data: \n\ndata: === Cleaning up stray Security Groups ===\n\n"
+        try:
+            session = boto3.Session(
+                aws_access_key_id=aws_creds["access_key"],
+                aws_secret_access_key=aws_creds["secret_key"],
+                region_name=region
+            ) if aws_creds else boto3.Session(region_name=region)
+            ec2c = session.client("ec2")
+
+            # Find all non-default SGs
+            all_sgs = ec2c.describe_security_groups(
+                Filters=[{"Name": "description", "Values": ["*ALB*","*EC2*","*ECS*","*security group*"]}]
+            )["SecurityGroups"]
+            # Filter out default SGs
+            target_sgs = [sg for sg in all_sgs if sg["GroupName"] != "default"]
+
+            for sg in target_sgs:
+                sg_id = sg["GroupId"]
+                # Revoke rules
+                try:
+                    if sg.get("IpPermissions"):
+                        ec2c.revoke_security_group_ingress(GroupId=sg_id, IpPermissions=sg["IpPermissions"])
+                    if sg.get("IpPermissionsEgress"):
+                        ec2c.revoke_security_group_egress(GroupId=sg_id, IpPermissions=sg["IpPermissionsEgress"])
+                except Exception:
+                    pass
+                # Delete ENIs
+                try:
+                    enis = ec2c.describe_network_interfaces(
+                        Filters=[{"Name": "group-id", "Values": [sg_id]}])["NetworkInterfaces"]
+                    for eni in enis:
+                        att = eni.get("Attachment", {})
+                        if att.get("AttachmentId"):
+                            try:
+                                ec2c.detach_network_interface(AttachmentId=att["AttachmentId"], Force=True)
+                                time.sleep(2)
+                            except Exception:
+                                pass
+                        try:
+                            ec2c.delete_network_interface(NetworkInterfaceId=eni["NetworkInterfaceId"])
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                # Delete SG with retries
+                for _ in range(3):
+                    try:
+                        ec2c.delete_security_group(GroupId=sg_id)
+                        yield f"data: ✓ Cleaned up SG {sg_id} ({sg['GroupName']})\n\n"
+                        break
+                    except Exception as e:
+                        if "InvalidGroup.NotFound" in str(e):
+                            break
+                        time.sleep(10)
+
+        except Exception as e:
+            yield f"data: ⚠ Stray SG cleanup error: {e}\n\n"
+
+        yield "data: \n\ndata: === DESTROY ALL COMPLETE ===\n\n"
+
+    return StreamingResponse(run(), media_type="text/event-stream")
 
 
 @app.post("/destroy/terraform")

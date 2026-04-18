@@ -3636,46 +3636,35 @@ async function deployAll(){
 }
 async function destroyAll(){
   var dbtn=document.getElementById("destroy-all-btn");
-  if(dbtn){dbtn.style.animation="breathe-r 1.5s ease-in-out infinite";}
-  var env=(document.getElementById("deploy-env")||{}).value||"dev";
-  var region=(document.getElementById("deploy-region")||{}).value||"us-east-1";
-  var sel=document.getElementById("deploy-folder");if(!sel)return;
-  await loadDeployFolders();
-  var folders=[];
-  for(var i=0;i<sel.options.length;i++){if(sel.options[i].value)folders.push(sel.options[i].value);}
-  if(!folders.length){alert("No folders found!");return;}
-  if(!confirm("DESTROY ALL "+folders.length+" services in AWS?\n\nEnvironment: "+env+"\nRegion: "+region+"\n\nThis will PERMANENTLY DELETE all AWS resources!\nThis cannot be undone!"))return;
+  if(!confirm("DESTROY ALL services in AWS?\n\nThis will PERMANENTLY DELETE every AWS resource!\nThis cannot be undone!"))return;
   if(!confirm("Are you 100% sure? Click OK to confirm permanent deletion."))return;
   var log=document.getElementById("deploy-log");
   var status=document.getElementById("deploy-status");
-  log.innerHTML='<div style="color:#555;font-size:10px;margin-bottom:8px">Environment: <b style="color:#a78bfa">'+env+'</b> &nbsp;|&nbsp; Region: <b style="color:#60a5fa">'+region+'</b></div>';
+  log.innerHTML='<div style="color:#f87171;font-weight:700">☢ NUCLEAR DESTROY — All Services</div>';
   status.style.display="block";status.style.color="#f87171";
-  status.textContent="Destroying all AWS resources...";
-  for(var i=0;i<folders.length;i++){
-    log.innerHTML+='<div style="color:#f87171;font-weight:700;margin:5px 0">== DESTROYING ['+(i+1)+'/'+folders.length+']: '+folders[i]+' ==</div>';
-    log.scrollTop=log.scrollHeight;
-    try{
-      var r=await fetch("/destroy/terraform",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({resource_type:"destroy",config:{folder:folders[i],environment:env,region:region}})});
-      var reader=r.body.getReader();var decoder=new TextDecoder();
-      while(true){
-        var result=await reader.read();if(result.done)break;
-        var text=decoder.decode(result.value);
-        var lines=text.split("\n");
-        for(var j=0;j<lines.length;j++){
-          var line=lines[j];
-          if(line.startsWith("data: ")){
-            var content=line.substring(6);
-            if(content==="DEPLOY_SUCCESS"){log.innerHTML+='<div style="color:#4ade80">✓ Destroyed: '+folders[i]+'</div>';markNodesDestroyed(folders[i]);break;}
-            else if(content==="DEPLOY_FAILED"){log.innerHTML+='<div style="color:#f87171">✗ Failed: '+folders[i]+'</div>';break;}
-            else if(content)log.innerHTML+='<div style="color:#f87171">'+content+'</div>';
-            log.scrollTop=log.scrollHeight;
-          }
-        }
-      }
-    }catch(e){log.innerHTML+='<div style="color:#f87171">Error: '+e.message+'</div>';}
-  }
+  status.textContent="Destroying everything in AWS...";
+  if(dbtn){dbtn.disabled=true;dbtn.textContent="☢ Destroying...";dbtn.style.animation="breathe-r 1.5s ease-in-out infinite";}
+  try{
+    var r=await fetch("/destroy/all",{method:"POST",credentials:"include"});
+    var reader=r.body.getReader();var decoder=new TextDecoder();
+    while(true){
+      var result=await reader.read();if(result.done)break;
+      var text=decoder.decode(result.value);
+      text.split("\n").forEach(function(line){
+        if(!line.startsWith("data: "))return;
+        var content=line.substring(6).trim();
+        if(!content)return;
+        var color=content.startsWith("✓")?"#4ade80":content.startsWith("⚠")?"#facc15":"#f87171";
+        if(content.startsWith("==="))color="#a78bfa";
+        if(content.startsWith("──"))color="#60a5fa";
+        log.innerHTML+='<div style="color:'+color+';font-size:11px">'+content+'</div>';
+        log.scrollTop=log.scrollHeight;
+      });
+    }
+  }catch(e){log.innerHTML+='<div style="color:#f87171">Error: '+e.message+'</div>';}
   status.style.color="#4ade80";status.textContent="All AWS resources destroyed!";
-  showNotif("ok","Destroyed!","All AWS resources deleted from AWS.","",6000);
+  if(dbtn){dbtn.disabled=false;dbtn.textContent="🗑 DESTROY ALL in AWS";dbtn.style.animation="";}
+  showNotif("ok","Destroyed!","All AWS resources deleted.","",6000);
 }
 function stopDeploy(){
   deployStop=true;
