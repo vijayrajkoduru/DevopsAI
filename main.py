@@ -1362,6 +1362,140 @@ def security_scan(resource: AWSResource, request: Request):
 
 # ── DEPLOY ROUTES ──────────────────────────────────────────────────────────────
 
+def _auto_import_existing(full_path: str, error_output: str, failed_cmd: list, env: dict) -> bool:
+    """
+    When terraform apply fails with 'already exists', automatically import
+    the conflicting resource into state so the next apply succeeds.
+    Returns True if an import was attempted.
+    """
+    # Map of error patterns → (resource_address_pattern, id_extractor)
+    ALREADY_EXISTS_PATTERNS = [
+        # API Gateway V2 domain name
+        (r'aws_apigatewayv2_domain_name\.\w+',
+         r'domain name you provided already exists',
+         r'domain_name\s*=\s*"([^"]+)"'),
+        # ALB / NLB
+        (r'aws_lb\.\w+',
+         r'already exists|DuplicateLoadBalancerName',
+         r'name\s*=\s*"([^"]+)"'),
+        # ECS Cluster
+        (r'aws_ecs_cluster\.\w+',
+         r'already exists|ClusterExists',
+         r'name\s*=\s*"([^"]+)"'),
+        # ECR Repository
+        (r'aws_ecr_repository\.\w+',
+         r'RepositoryAlreadyExistsException',
+         r'name\s*=\s*"([^"]+)"'),
+        # IAM Role
+        (r'aws_iam_role\.\w+',
+         r'EntityAlreadyExists.*Role',
+         r'name\s*=\s*"([^"]+)"'),
+        # S3 Bucket
+        (r'aws_s3_bucket\.\w+',
+         r'BucketAlreadyOwnedByYou|BucketAlreadyExists',
+         r'bucket\s*=\s*"([^"]+)"'),
+        # Security Group
+        (r'aws_security_group\.\w+',
+         r'InvalidGroup.Duplicate|already exists',
+         r'name\s*=\s*"([^"]+)"'),
+        # RDS
+        (r'aws_db_instance\.\w+',
+         r'DBInstanceAlreadyExists',
+         r'identifier\s*=\s*"([^"]+)"'),
+        # ElastiCache
+        (r'aws_elasticache_cluster\.\w+',
+         r'CacheClusterAlreadyExists',
+         r'cluster_id\s*=\s*"([^"]+)"'),
+    ]
+
+    # Resource type → boto3 import ID resolver
+    IMPORT_ID_RESOLVERS = {
+        "aws_apigatewayv2_domain_name": lambda name, env: name,  # ID = domain name itself
+        "aws_lb":                        lambda name, env: _resolve_alb_arn(name, env),
+        "aws_ecs_cluster":               lambda name, env: name,
+        "aws_ecr_repository":            lambda name, env: name,
+        "aws_iam_role":                  lambda name, env: name,
+        "aws_s3_bucket":                 lambda name, env: name,
+        "aws_security_group":            lambda name, env: _resolve_sg_id(name, env),
+        "aws_db_instance":               lambda name, env: name,
+        "aws_elasticache_cluster":       lambda name, env: name,
+    }
+
+    imported = False
+    for addr_pattern, err_pattern, name_pattern in ALREADY_EXISTS_PATTERNS:
+        if not re.search(err_pattern, error_output, re.IGNORECASE):
+            continue
+        addr_match = re.search(addr_pattern, error_output)
+        if not addr_match:
+            continue
+        resource_addr = addr_match.group(0)
+        resource_type = resource_addr.split(".")[0]
+
+        # Find the resource name from main.tf
+        main_tf = os.path.join(full_path, "main.tf")
+        if not os.path.exists(main_tf):
+            continue
+        with open(main_tf, encoding="utf-8") as f:
+            tf_content = f.read()
+        name_match = re.search(name_pattern, tf_content)
+        if not name_match:
+            continue
+        resource_name = name_match.group(1)
+
+        # Resolve the AWS import ID
+        resolver = IMPORT_ID_RESOLVERS.get(resource_type)
+        if not resolver:
+            continue
+        try:
+            import_id = resolver(resource_name, env)
+        except Exception:
+            import_id = resource_name
+
+        if not import_id:
+            continue
+
+        # Extract -var flags from the failed command
+        var_flags = []
+        for i, part in enumerate(failed_cmd):
+            if part == "-var" and i + 1 < len(failed_cmd):
+                var_flags += ["-var", failed_cmd[i+1]]
+
+        result = subprocess.run(
+            ["terraform", "import", "-no-color"] + var_flags + [resource_addr, import_id],
+            cwd=full_path, env=env, capture_output=True, text=True
+        )
+        imported = True
+
+    return imported
+
+
+def _resolve_alb_arn(name: str, env: dict) -> str:
+    try:
+        import boto3
+        client = boto3.client("elbv2",
+            aws_access_key_id=env.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=env.get("AWS_SECRET_ACCESS_KEY"),
+            region_name=env.get("AWS_DEFAULT_REGION", "us-east-1"))
+        lbs = client.describe_load_balancers(Names=[name])["LoadBalancers"]
+        return lbs[0]["LoadBalancerArn"] if lbs else name
+    except Exception:
+        return name
+
+
+def _resolve_sg_id(name: str, env: dict) -> str:
+    try:
+        import boto3
+        client = boto3.client("ec2",
+            aws_access_key_id=env.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=env.get("AWS_SECRET_ACCESS_KEY"),
+            region_name=env.get("AWS_DEFAULT_REGION", "us-east-1"))
+        sgs = client.describe_security_groups(
+            Filters=[{"Name": "group-name", "Values": [name]}])["SecurityGroups"]
+        return sgs[0]["GroupId"] if sgs else name
+    except Exception:
+        return name
+
+
 def run_terraform_streaming(full_path: str, commands: list, aws_creds: dict = None):
     cache_dir = os.path.join(os.path.expanduser("~"), ".terraform.d", "plugin-cache")
     os.makedirs(cache_dir, exist_ok=True)
@@ -1417,6 +1551,28 @@ def run_terraform_streaming(full_path: str, commands: list, aws_creds: dict = No
                 yield "data: DEPLOY_FAILED\n\n"
                 return
         if last_returncode != 0:
+            # ── Auto-import on "already exists" errors ──────────────────────
+            full_output = "\n".join(output_lines)
+            import_attempted = _auto_import_existing(full_path, full_output, cmd, env)
+            if import_attempted:
+                yield "data: ♻ Auto-imported existing resource — retrying apply...\n\n"
+                try:
+                    process2 = subprocess.Popen(
+                        cmd, cwd=full_path,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, bufsize=1, env=env,
+                        encoding='utf-8', errors='replace'
+                    )
+                    for line in process2.stdout:
+                        line = line.rstrip()
+                        if line:
+                            yield "data: " + line + "\n\n"
+                    process2.wait()
+                    if process2.returncode == 0:
+                        yield "data: SUCCESS: " + " ".join(cmd) + " completed!\n\n"
+                        continue
+                except Exception:
+                    pass
             yield "data: ERROR: Command failed with code " + str(last_returncode) + "\n\n"
             yield "data: DEPLOY_FAILED\n\n"
             return
