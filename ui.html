@@ -2072,9 +2072,9 @@ function cancelConnect(){
 }
 document.addEventListener("keydown",function(e){
   if(e.key==="Escape"){
-    // Close all panels/modals in priority order
     var closed=false;
     if(document.getElementById("validate-overlay")){document.getElementById("validate-overlay").remove();closed=true;}
+    if(document.getElementById("arch-overlay")&&document.getElementById("arch-overlay").classList.contains("open")){closeArchitect();closed=true;}
     if(document.getElementById("settings-modal")&&document.getElementById("settings-modal").style.display!=="none"){closeSettings();closed=true;}
     if(document.getElementById("gh-modal")&&document.getElementById("gh-modal").style.display!=="none"){closeGitHubPush();closed=true;}
     if(document.getElementById("gh-import-modal")&&document.getElementById("gh-import-modal").classList.contains("open")){closeGitHubImport();closed=true;}
@@ -5237,7 +5237,7 @@ function buildCanvasFromGitHub() {
 .spin-sm{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle}
 </style>
 
-<div id="arch-overlay">
+<div id="arch-overlay" onclick="if(event.target===this)closeArchitect()">
   <div id="arch-box">
     <div id="arch-close" onclick="closeArchitect()" style="position:absolute;top:16px;right:18px;color:#333;cursor:pointer;font-size:18px;z-index:10;transition:color 0.2s" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#333'">✕</div>
 
@@ -5437,7 +5437,7 @@ function buildCanvasFromGitHub() {
         <div style="grid-column:1/-1;font-size:9px;color:#333;text-transform:uppercase;letter-spacing:1.5px;padding:6px 0 4px;border-bottom:1px solid #0e0e18;margin-bottom:2px">Infrastructure Focus</div>
         <div class="atype-card" id="atype-zerodeploy" onclick="selectArchType('zerodeploy')"><span>🔵</span><strong>Zero-Downtime</strong><small>Blue/green + canary</small></div>
         <div class="atype-card" id="atype-autoscale" onclick="selectArchType('autoscale')"><span>📈</span><strong>Auto-scaling</strong><small>KEDA + HPA + CA</small></div>
-        <div class="atype-card selected" id="atype-custom" onclick="selectArchType('custom')"><span>✏</span><strong>Custom</strong><small>Describe your own</small></div>
+        <div class="atype-card" id="atype-custom" onclick="selectArchType('custom')"><span>✏</span><strong>Custom</strong><small>Describe your own</small></div>
       </div>
 
       <textarea id="arch-input" placeholder="Describe your system — or select a type above and it will auto-fill..."></textarea>
@@ -5543,6 +5543,8 @@ function clearArchImage(){
 function openArchitect() {
   resetPipeline();
   clearArchImage();
+  // Clear any previously selected type card
+  document.querySelectorAll('.atype-card').forEach(function(c){c.classList.remove('selected');});
   document.getElementById('arch-overlay').classList.add('open');
   setTimeout(function(){ document.getElementById('arch-input').focus(); }, 200);
 }
