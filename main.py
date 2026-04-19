@@ -951,6 +951,7 @@ def generate_terraform(resource: AWSResource, request: Request):
         + "4. Add lifecycle { ignore_changes = [tags, tags_all] } ONLY to resources that support tagging. NEVER add it to: aws_autoscaling_group, aws_s3_bucket_public_access_block, aws_s3_bucket_versioning, aws_s3_bucket_server_side_encryption_configuration, aws_iam_role_policy, aws_route53_record, aws_acm_certificate_validation\n"
         + "5. Ready to deploy with zero manual edits\n"
         + "5b. providers.tf MUST contain ONLY: provider \"aws\" { region = var.aws_region } — NEVER add default_tags, assume_role, or any other block\n"
+        + "5c. For Lambda: NEVER add vpc_config or security groups unless the user explicitly requested VPC networking. A Lambda without VPC is simpler and deploys reliably.\n"
         + "6. NEVER use semicolons inside blocks — always use newlines between arguments\n"
         + "7. NEVER write single-line blocks like `ingress { a=1; b=2 }` — always expand to multi-line\n"
         + "8. For Route53 zone ALWAYS use resource \"aws_route53_zone\" \"main\" (not data source). The deploy system handles deduplication automatically.\n"
