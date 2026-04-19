@@ -1714,6 +1714,15 @@ def deploy_terraform(resource: AWSResource, request: Request):
                 _prov_fixed = _prov_content
                 # Remove orphaned closing braces (e.g. lone `}` lines with no matching open)
                 _prov_fixed = re.sub(r'\n\s*\}\s*\n\s*\}\s*$', '', _prov_fixed.rstrip()).strip()
+                # If default_tags block present OR braces are unbalanced, rebuild minimal providers.tf
+                # (default_tags blocks are optional and frequently malformed — strip them entirely)
+                _has_default_tags = 'default_tags' in _prov_fixed
+                _opens  = _prov_fixed.count('{')
+                _closes = _prov_fixed.count('}')
+                if _has_default_tags or _opens != _closes:
+                    _region_m   = re.search(r'region\s*=\s*([^\n]+)', _prov_fixed)
+                    _region_val = _region_m.group(1).strip() if _region_m else 'var.aws_region'
+                    _prov_fixed = f'provider "aws" {{\n  region = {_region_val}\n}}'
                 # If both files declare required_providers, remove it from providers.tf
                 if os.path.exists(_main_tf):
                     with open(_main_tf, encoding="utf-8") as _f:
@@ -1949,14 +1958,32 @@ def deploy_terraform(resource: AWSResource, request: Request):
                 yield chunk
 
             phase1_failed = False
+            phase1_output = ""
+            _p1_targets = [
+                f"-target=aws_acm_certificate.{_cert_tf_name}",
+                f"-target=aws_route53_zone.{_zone_tf_name}",
+            ]
             for chunk in run_terraform_streaming(full_path, [
-                ["terraform", "apply", "-auto-approve", "-no-color",
-                 f"-target=aws_acm_certificate.{_cert_tf_name}",
-                 f"-target=aws_route53_zone.{_zone_tf_name}"] + tf_vars
+                ["terraform", "apply", "-auto-approve", "-no-color"] + _p1_targets + tf_vars
             ], aws_creds=aws_creds):
                 if "DEPLOY_FAILED" in chunk:
                     phase1_failed = True
+                if chunk.startswith("data: "):
+                    phase1_output += chunk[6:]
                 yield chunk
+            # "Moved resource instances excluded by targeting" — extract required extra targets and retry
+            if phase1_failed and "Moved resource instances excluded by targeting" in phase1_output:
+                _extra_targets = re.findall(r'-target="([^"]+)"', phase1_output)
+                if _extra_targets:
+                    phase1_failed = False
+                    yield f"data: ♻ Retrying Phase 1 with extra targets: {', '.join(_extra_targets)}\n\n"
+                    _p1_targets += [f"-target={t}" for t in _extra_targets]
+                    for chunk in run_terraform_streaming(full_path, [
+                        ["terraform", "apply", "-auto-approve", "-no-color"] + _p1_targets + tf_vars
+                    ], aws_creds=aws_creds):
+                        if "DEPLOY_FAILED" in chunk:
+                            phase1_failed = True
+                        yield chunk
             if phase1_failed:
                 return
 

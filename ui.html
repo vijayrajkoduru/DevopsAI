@@ -3686,10 +3686,18 @@ async function deployAll(){
       var logDiv=document.getElementById("deploy-log");
       var allLines=logDiv.innerText.split("\n");
       var lastLines=allLines.slice(-80).join("\n"); // last 80 lines = the error context
-      log.innerHTML+='<div style="color:#f59e0b;font-size:11px;margin:4px 0">🔧 Auto-fixing '+folders[i]+' — asking Claude...</div>';
-      log.scrollTop=log.scrollHeight;
 
-      var fixed=await _aiFixAndRetry(folders[i],lastLines,env,region,domain);
+      // Don't ask Claude to fix network/connectivity errors — no .tf change can help
+      var isNetworkErr=/no such host|dial tcp|connection refused|request send failed|StatusCode: 0[, ]*RequestID: ,/i.test(lastLines);
+      var fixed=false;
+      if(isNetworkErr){
+        log.innerHTML+='<div style="color:#94a3b8;font-size:11px;margin:4px 0">⚠ Network connectivity error — auto-fix skipped</div>';
+        log.scrollTop=log.scrollHeight;
+      } else {
+        log.innerHTML+='<div style="color:#f59e0b;font-size:11px;margin:4px 0">🔧 Auto-fixing '+folders[i]+' — asking Claude...</div>';
+        log.scrollTop=log.scrollHeight;
+        fixed=await _aiFixAndRetry(folders[i],lastLines,env,region,domain);
+      }
       if(fixed){
         autoFixed++;
         log.innerHTML+='<div style="color:#4ade80;font-size:11px;margin:4px 0">✓ Claude fixed the issue — retrying deploy...</div>';
