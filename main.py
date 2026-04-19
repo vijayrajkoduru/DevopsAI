@@ -956,9 +956,9 @@ def generate_terraform(resource: AWSResource, request: Request):
         + "7. NEVER write single-line blocks like `ingress { a=1; b=2 }` — always expand to multi-line\n"
         + "8. For Route53 zone ALWAYS use resource \"aws_route53_zone\" \"main\" (not data source). The deploy system handles deduplication automatically.\n"
         + "9. ALWAYS add allow_overwrite = true to every aws_route53_record resource\n"
-        + "10. For cert_validation for_each, use this EXACT pattern to handle duplicate keys from wildcard+root certs:\n"
-        + "    for_each = { for dvo in aws_acm_certificate.main.domain_validation_options : dvo.resource_record_name => { name=dvo.resource_record_name, record=dvo.resource_record_value, type=dvo.resource_record_type }... }\n"
-        + "    Then use each.value[0].name, each.value[0].type, each.value[0].record\n"
+        + "10. For cert_validation for_each, use dvo.domain_name as the map key (it is unique per domain). EXACT pattern:\n"
+        + "    for_each = { for dvo in aws_acm_certificate.main.domain_validation_options : dvo.domain_name => { name=dvo.resource_record_name, record=dvo.resource_record_value, type=dvo.resource_record_type } }\n"
+        + "    Then use each.value.name, each.value.type, each.value.record (no [0] index needed)\n"
         + f"6. ALWAYS declare variable 'domain_name' in variables.tf with default = \"{domain_name}\"\n"
         + f"7. ALWAYS set domain_name = \"{domain_name}\" in terraform.tfvars\n"
         + namespace_rule
@@ -1632,8 +1632,9 @@ def run_terraform_streaming(full_path: str, commands: list, aws_creds: dict = No
                 is_network_err = any(
                     kw in "\n".join(output_lines)
                     for kw in ["context deadline exceeded", "connection refused",
-                               "no such host", "timeout", "could not connect",
-                               "request canceled", "dial tcp", "i/o timeout"]
+                               "no such host", "could not connect", "i/o timeout",
+                               "request canceled", "dial tcp", "connection timed out",
+                               "TLS handshake timeout", "net/http: request canceled"]
                 )
                 if (is_init or is_apply) and is_network_err and attempt < max_attempts:
                     yield f"data: ⚠ Network error — waiting {retry_wait}s then retrying (attempt {attempt}/{max_attempts-1})...\n\n"
