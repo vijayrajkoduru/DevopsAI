@@ -1708,6 +1708,52 @@ def deploy_terraform(resource: AWSResource, request: Request):
     logger.info(f"Deploy started by {user['email']} for folder: {folder}")
 
     def run():
+        # ── Pre-deploy: fix cert_validation for_each to use dvo.domain_name key ──
+        # Also remove old resource_record_name-keyed entries from state to avoid destroy+recreate race
+        _main_tf = os.path.join(full_path, "main.tf")
+        if os.path.exists(_main_tf):
+            try:
+                with open(_main_tf, encoding="utf-8") as _f:
+                    _mt = _f.read()
+                # Fix: replace dvo.resource_record_name => with dvo.domain_name =>
+                _mt2 = re.sub(
+                    r'(for\s+dvo\s+in\s+\S+\.domain_validation_options\s*:\s*\n\s*)dvo\.resource_record_name\s*=>',
+                    r'\1dvo.domain_name =>', _mt)
+                # Remove stray ... grouping (not needed with domain_name key)
+                _mt2 = re.sub(r'(\}\s*)\.\.\.(\s*\n\s*\})', r'\1\2', _mt2)
+                # Fix each.value[0].x → each.value.x
+                _mt2 = re.sub(r'each\.value\[0\]\.(name|record|type)\b', r'each.value.\1', _mt2)
+                if _mt2 != _mt:
+                    with open(_main_tf, "w", encoding="utf-8") as _f:
+                        _f.write(_mt2)
+                    yield "data: ♻ Fixed cert_validation for_each key in main.tf\n\n"
+            except Exception:
+                pass
+        # ── Pre-deploy: clean old resource_record_name-keyed cert_validation from state ──
+        _state_path = os.path.join(full_path, "terraform.tfstate")
+        if os.path.exists(_state_path):
+            try:
+                with open(_state_path, encoding="utf-8") as _f:
+                    _st = json.load(_f)
+                _changed = False
+                for _r in _st.get("resources", []):
+                    if _r.get("type") == "aws_route53_record" and _r.get("name") == "cert_validation":
+                        _new_insts = []
+                        for _inst in _r.get("instances", []):
+                            _key = str(_inst.get("index_key", ""))
+                            # old keys look like "_xxxxx.domain." (start with _)
+                            if _key.startswith("_"):
+                                _changed = True
+                                continue
+                            _new_insts.append(_inst)
+                        _r["instances"] = _new_insts
+                if _changed:
+                    with open(_state_path, "w", encoding="utf-8") as _f:
+                        json.dump(_st, _f, indent=2)
+                    yield "data: ♻ Removed old cert_validation state entries (key migration)\n\n"
+            except Exception:
+                pass
+
         # ── Pre-deploy: fix duplicate required_providers across main.tf + providers.tf ──
         _main_tf   = os.path.join(full_path, "main.tf")
         _prov_tf   = os.path.join(full_path, "providers.tf")

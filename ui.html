@@ -3688,7 +3688,7 @@ async function deployAll(){
       var lastLines=allLines.slice(-80).join("\n"); // last 80 lines = the error context
 
       // Don't ask Claude to fix network/connectivity errors — no .tf change can help
-      var isNetworkErr=/no such host|dial tcp|connection refused|request send failed|StatusCode: 0[, ]*RequestID: ,|No valid credential sources|ExpiredToken|InvalidClientTokenId|AuthFailure|AccessDenied.*STS|credential/i.test(lastLines);
+      var isNetworkErr=/no such host|dial tcp|connection refused|request send failed|StatusCode: 0[, ]*RequestID: ,|No valid credential sources|ExpiredToken|InvalidClientTokenId|AuthFailure|AccessDenied.*STS|credential|empty result|must be replaced/i.test(lastLines);
       var fixed=false;
       if(isNetworkErr){
         log.innerHTML+='<div style="color:#94a3b8;font-size:11px;margin:4px 0">⚠ Network connectivity error — auto-fix skipped</div>';
