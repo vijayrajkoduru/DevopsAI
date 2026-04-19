@@ -950,6 +950,7 @@ def generate_terraform(resource: AWSResource, request: Request):
         + "   Then in aws_subnets: filter { name = \"availabilityZone\" values = data.aws_availability_zones.available.names }\n"
         + "4. Add lifecycle { ignore_changes = [tags, tags_all] } ONLY to resources that support tagging. NEVER add it to: aws_autoscaling_group, aws_s3_bucket_public_access_block, aws_s3_bucket_versioning, aws_s3_bucket_server_side_encryption_configuration, aws_iam_role_policy, aws_route53_record, aws_acm_certificate_validation\n"
         + "5. Ready to deploy with zero manual edits\n"
+        + "5b. providers.tf MUST contain ONLY: provider \"aws\" { region = var.aws_region } — NEVER add default_tags, assume_role, or any other block\n"
         + "6. NEVER use semicolons inside blocks — always use newlines between arguments\n"
         + "7. NEVER write single-line blocks like `ingress { a=1; b=2 }` — always expand to multi-line\n"
         + "8. For Route53 zone ALWAYS use resource \"aws_route53_zone\" \"main\" (not data source). The deploy system handles deduplication automatically.\n"
@@ -1603,9 +1604,10 @@ def run_terraform_streaming(full_path: str, commands: list, aws_creds: dict = No
     for cmd in commands:
         yield "data: \n\n"
         yield "data: === Running: " + " ".join(cmd) + " ===\n\n"
-        is_init = "init" in cmd
-        max_attempts = 5 if is_init else 1
-        retry_wait   = 30  # seconds between retries — gives slow networks time to recover
+        is_init  = "init"  in cmd
+        is_apply = "apply" in cmd
+        max_attempts = 5 if is_init else (3 if is_apply else 1)
+        retry_wait   = 30 if is_init else 15  # shorter wait for apply retries
         last_returncode = 0
         for attempt in range(1, max_attempts + 1):
             try:
@@ -1632,7 +1634,7 @@ def run_terraform_streaming(full_path: str, commands: list, aws_creds: dict = No
                                "no such host", "timeout", "could not connect",
                                "request canceled", "dial tcp", "i/o timeout"]
                 )
-                if is_init and is_network_err and attempt < max_attempts:
+                if (is_init or is_apply) and is_network_err and attempt < max_attempts:
                     yield f"data: ⚠ Network error — waiting {retry_wait}s then retrying (attempt {attempt}/{max_attempts-1})...\n\n"
                     import time; time.sleep(retry_wait)
                     continue
@@ -1720,7 +1722,7 @@ def deploy_terraform(resource: AWSResource, request: Request):
                 _opens  = _prov_fixed.count('{')
                 _closes = _prov_fixed.count('}')
                 if _has_default_tags or _opens != _closes:
-                    _region_m   = re.search(r'region\s*=\s*([^\n]+)', _prov_fixed)
+                    _region_m   = re.search(r'region\s*=\s*([^\n#]+)', _prov_fixed)
                     _region_val = _region_m.group(1).strip() if _region_m else 'var.aws_region'
                     _prov_fixed = f'provider "aws" {{\n  region = {_region_val}\n}}'
                 # If both files declare required_providers, remove it from providers.tf
